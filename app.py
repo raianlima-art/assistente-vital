@@ -29,7 +29,7 @@ ADM_PASSWORD = os.getenv("ADM_PASSWORD", "admin123")
 LOGO_PATH = "logo.png"
 
 # -----------------------------------------------------------------------------
-# 2. CONFIGURAÇÃO DA PÁGINA E CLIENTES DE API
+# 2. CONFIGURAÇÃO DA PÁGINA
 # -----------------------------------------------------------------------------
 pagina_icone = LOGO_PATH if os.path.exists(LOGO_PATH) else "🤖"
 
