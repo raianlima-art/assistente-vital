@@ -1,4 +1,6 @@
 import base64
+import datetime
+import io
 import json
 import os
 import smtplib
@@ -8,23 +10,35 @@ import streamlit as st
 from dotenv import load_dotenv
 from geopy.distance import geodesic
 from geopy.geocoders import Photon
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 from openai import OpenAI
 from supabase import Client, create_client
 
 # -----------------------------------------------------------------------------
-# 1. CARREGAMENTO DAS VARIÁVEIS DE AMBIENTE (.env)
+# 1. CARREGAMENTO DAS VARIÁVEIS DE AMBIENTE (.env LOCAL E st.secrets NUVEM)
 # -----------------------------------------------------------------------------
-load_dotenv()
+load_dotenv(override=True)
 
-API_KEY_OPENAI = os.getenv("OPENAI_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+def get_secret(key, default=None):
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.getenv(key, default)
 
-EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE")
-EMAIL_SENHA_APP = os.getenv("EMAIL_SENHA_APP")
-EMAIL_DESTINATARIO = os.getenv("EMAIL_DESTINATARIO")
+API_KEY_OPENAI = get_secret("OPENAI_API_KEY")
+SUPABASE_URL = get_secret("SUPABASE_URL")
+SUPABASE_KEY = get_secret("SUPABASE_KEY")
 
-ADM_PASSWORD = os.getenv("ADM_PASSWORD", "admin123")
+EMAIL_REMETENTE = get_secret("EMAIL_REMETENTE")
+EMAIL_SENHA_APP = get_secret("EMAIL_SENHA_APP")
+EMAIL_DESTINATARIO = get_secret("EMAIL_DESTINATARIO")
+
+ADM_PASSWORD = get_secret("ADM_PASSWORD", "admin123")
+GOOGLE_DRIVE_FOLDER_ID = get_secret("GOOGLE_DRIVE_FOLDER_ID", "")
 
 LOGO_PATH = "logo.png"
 
@@ -40,7 +54,7 @@ st.set_page_config(
 )
 
 if not API_KEY_OPENAI:
-    st.error("❌ A chave 'OPENAI_API_KEY' não foi encontrada no arquivo .env!")
+    st.error("❌ A chave 'OPENAI_API_KEY' não foi encontrada! Verifique o .env ou o Secrets do Streamlit.")
     st.stop()
 
 client = OpenAI(api_key=API_KEY_OPENAI)
@@ -53,7 +67,88 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
         st.sidebar.warning(f"⚠️ Supabase offline: {e}")
 
 # -----------------------------------------------------------------------------
-# 3. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM
+# 3. FUNÇÕES DE UPLOAD PARA O GOOGLE DRIVE (COMPARTILHADO + PASTA POR MÊS)
+# -----------------------------------------------------------------------------
+def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
+    hoje = datetime.datetime.now()
+    nome_pasta_mes = hoje.strftime("%m-%Y") 
+
+    query = f"'{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{nome_pasta_mes}' and trashed=false"
+    
+    resultados = service.files().list(
+        q=query, 
+        spaces='drive',
+        supportsAllDrives=True, 
+        includeItemsFromAllDrives=True,
+        fields='files(id, name)'
+    ).execute()
+    
+    pastas = resultados.get('files', [])
+    
+    if pastas:
+        return pastas[0]['id']
+    else:
+        file_metadata = {
+            'name': nome_pasta_mes,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [parent_folder_id]
+        }
+        pasta_criada = service.files().create(
+            body=file_metadata,
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        
+        return pasta_criada.get('id')
+
+
+def salvar_nf_no_drive(file_bytes, nome_arquivo):
+    try:
+        if os.path.exists("credentials.json"):
+            creds = Credentials.from_service_account_file(
+                "credentials.json",
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+        else:
+            creds_raw = get_secret("GOOGLE_DRIVE_CREDENTIALS")
+            if not creds_raw:
+                st.error("❌ Arquivo 'credentials.json' ou segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
+                return None
+            
+            if isinstance(creds_raw, str):
+                creds_json = json.loads(creds_raw)
+            else:
+                creds_json = creds_raw
+
+            if "private_key" in creds_json:
+                creds_json["private_key"] = creds_json["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(
+                creds_json, 
+                scopes=['https://www.googleapis.com/auth/drive.file']
+            )
+
+        service = build('drive', 'v3', credentials=creds)
+
+        pasta_destino_id = obter_ou_criar_pasta_do_mes(service, GOOGLE_DRIVE_FOLDER_ID)
+
+        file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype='application/pdf', resumable=True)
+        
+        file = service.files().create(
+            body=file_metadata, 
+            media_body=media, 
+            fields='id, webViewLink',
+            supportsAllDrives=True
+        ).execute()
+        
+        return file.get('webViewLink')
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar no Google Drive: {e}")
+        return None
+
+# -----------------------------------------------------------------------------
+# 4. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM
 # -----------------------------------------------------------------------------
 if "usuario_identificado" not in st.session_state:
     st.session_state.usuario_identificado = False
@@ -61,12 +156,12 @@ if "usuario_identificado" not in st.session_state:
 if "is_adm" not in st.session_state:
     st.session_state.is_adm = False
 
-# Tela de Login do Operador
 if not st.session_state.usuario_identificado:
     st.title("🤖 Assistente Integrado Vital")
     st.markdown("### 👤 Identificação do Solicitante")
-    st.info("Por favor, informe seus dados antes de iniciar o atendimento.")
+    st.info("Por favor, informe seus dados para iniciar ou acesse diretamente como Administrador.")
 
+    # Formulário Padrão de Usuário
     with st.form("form_identificacao"):
         nome_user = st.text_input("Seu Nome Completo:")
         setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Manutenção, Frota, Compras...")
@@ -83,10 +178,29 @@ if not st.session_state.usuario_identificado:
                 st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user})"
                 st.session_state.usuario_identificado = True
                 st.rerun()
+
+    st.divider()
+
+    # Acesso Direto para ADM (Sem Identificação de Usuário)
+    with st.expander("🔑 Acesso Direto para Administradores (Painel ADM)", expanded=True):
+        with st.form("form_adm_direto"):
+            senha_adm_direta = st.text_input("Senha do Administrador:", type="password")
+            btn_adm_direto = st.form_submit_button("🔓 Entrar Direto no Painel ADM")
+            
+            if btn_adm_direto:
+                if senha_adm_direta == ADM_PASSWORD:
+                    st.session_state.is_adm = True
+                    st.session_state.solicitante_str = "Administrador (ADM)"
+                    st.session_state.usuario_identificado = True
+                    st.success("Acesso ADM Liberado!")
+                    st.rerun()
+                else:
+                    st.error("Senha incorreta!")
+
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 4. BARRA LATERAL
+# 5. BARRA LATERAL
 # -----------------------------------------------------------------------------
 ipva = 10000.0
 seguro = 10000.0
@@ -108,7 +222,6 @@ with st.sidebar:
 
     st.divider()
 
-    # --- VALIDAÇÃO ADMINISTRATIVA ---
     st.header("🔑 Acesso ADM")
     if not st.session_state.is_adm:
         senha_input = st.text_input("Senha do Administrador:", type="password", key="input_adm_pass")
@@ -148,11 +261,11 @@ with st.sidebar:
 custo_fixo_diaria = (ipva + seguro + manut_anual) / dias_uteis
 
 # -----------------------------------------------------------------------------
-# 5. FUNÇÃO DE ENVIO DE E-MAIL
+# 6. FUNÇÃO DE ENVIO DE E-MAIL
 # -----------------------------------------------------------------------------
 def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante):
     if not EMAIL_REMETENTE or not EMAIL_SENHA_APP or not EMAIL_DESTINATARIO:
-        print("⚠️ Dados de e-mail não preenchidos no .env")
+        print("⚠️ Dados de e-mail não preenchidos.")
         return False
 
     msg = MIMEMultipart()
@@ -163,7 +276,6 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
     corpo = f"""
     <h2>🛒 Nova Solicitação de Compra Recebida!</h2>
     <p>O assistente virtual recebeu um novo pedido de insumo/peça:</p>
-    
     <ul>
         <li><strong>Solicitante:</strong> {solicitante}</li>
         <li><strong>Nome do item:</strong> {descricao}</li>
@@ -171,7 +283,6 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
         <li><strong>Detalhe:</strong> {referencia} (<a href="{link}">Ver Produto</a>)</li>
         <li><strong>Motivo:</strong> {motivo}</li>
     </ul>
-
     <hr>
     <p><small>Este e-mail foi gerado automaticamente pelo Assistente Integrado Vital.</small></p>
     """
@@ -182,14 +293,13 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(EMAIL_REMETENTE, EMAIL_SENHA_APP.replace(" ", ""))
             server.sendmail(EMAIL_REMETENTE, EMAIL_DESTINATARIO, msg.as_string())
-        print("📧 E-mail de notificação enviado com sucesso!")
         return True
     except Exception as e:
         print(f"❌ Erro ao enviar e-mail: {e}")
         return False
 
 # -----------------------------------------------------------------------------
-# 6. FUNÇÕES DE SUPORTE E CÁLCULO
+# 7. FUNÇÕES DE SUPORTE E CÁLCULO
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Consultando mapa...")
 def obter_localizacao(cidade):
@@ -269,10 +379,10 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
             }).execute()
             
     enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante)
-    return {"sucesso": True, "mensagem": f"Item registrado e e-mail enviado!"}
+    return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
 
 # -----------------------------------------------------------------------------
-# 7. FERRAMENTAS DA IA (TOOLS)
+# 8. FERRAMENTAS DA IA (TOOLS)
 # -----------------------------------------------------------------------------
 tools = [
     {
@@ -314,7 +424,7 @@ tools = [
 ]
 
 # -----------------------------------------------------------------------------
-# 8. INTERFACE PRINCIPAL E ABAS
+# 9. INTERFACE PRINCIPAL E ABAS
 # -----------------------------------------------------------------------------
 st.title("🤖 Assistente Integrado Vital")
 
@@ -353,7 +463,6 @@ Seja cortês, profissional e objetivo.
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "system", "content": system_prompt}]
 
-    # RENDERIZA HISTÓRICO (APENAS MENSAGENS DE USUÁRIO E ASSISTENTE - OMITE FERRAMENTAS BRUTAS)
     for msg in st.session_state.messages:
         role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
         content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
@@ -367,14 +476,11 @@ Seja cortês, profissional e objetivo.
                 else:
                     st.markdown(content, unsafe_allow_html=True)
 
-    # INPUT DE MENSAGEM
     if prompt := st.chat_input("Digite sua mensagem, peça um frete ou anexe uma foto...", accept_file=True):
-        
         user_text = getattr(prompt, "text", "") if not isinstance(prompt, str) else prompt
         user_files = getattr(prompt, "files", []) if not isinstance(prompt, str) else []
 
         user_payload = []
-        
         if user_files:
             for file in user_files:
                 bytes_data = file.read()
@@ -476,15 +582,12 @@ Seja cortês, profissional e objetivo.
                 )
 
                 texto_final = final_response.choices[0].message.content
-                
-                # Se um card HTML foi gerado, anexa ao topo da resposta
                 conteudo_completo = f"{card_html_gerado}\n\n{texto_final}" if card_html_gerado else texto_final
                 st.session_state.messages.append({"role": "assistant", "content": conteudo_completo})
 
             else:
                 st.session_state.messages.append({"role": "assistant", "content": response_message.content})
 
-        # Recarrega a página para desenhar tudo ordenado com o chat_input no final da tela
         st.rerun()
 
 # =============================================================================
@@ -495,19 +598,17 @@ if aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
         if not supabase:
-            st.warning("⚠️ O Supabase não está conectado. Configure as variáveis no .env para utilizar esta aba.")
+            st.warning("⚠️ O Supabase não está conectado.")
         else:
             filtro_status = st.selectbox(
                 "Filtrar por Status:", 
-                ["Ativos (Pendentes e Comprados)", "Pendente", "Comprado", "Aprovado", "Recusado", "Finalizado", "Todos (Com Histórico)"],
+                ["Pendente", "Aguardando entrega", "Aguardando NF", "Finalizado", "Recusado", "Todos (Com Histórico)"],
                 index=0
             )
 
             query = supabase.table("solicitacoes_compras").select("*")
             
-            if filtro_status == "Ativos (Pendentes e Comprados)":
-                query = query.neq("status", "Finalizado")
-            elif filtro_status != "Todos (Com Histórico)":
+            if filtro_status != "Todos (Com Histórico)":
                 query = query.eq("status", filtro_status)
                 
             dados_compras = query.order("id", desc=True).execute().data
@@ -526,11 +627,14 @@ if aba_gestao:
                     solic = item.get("solicitante", "N/A")
                     link = item.get("link_produto", "#")
                     status_atual = item.get("status", "Pendente")
+                    link_nf = item.get("link_nf")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
-                    elif status_atual in ["Aprovado", "Comprado"]:
+                    elif status_atual == "Aguardando entrega":
                         cor_borda = "#10b981"
+                    elif status_atual == "Aguardando NF":
+                        cor_borda = "#2563eb"
                     elif status_atual == "Finalizado":
                         cor_borda = "#64748b"
                     else:
@@ -550,26 +654,43 @@ if aba_gestao:
                         </div>
                         """, unsafe_allow_html=True)
 
+                        # Exibição / Anexo da Nota Fiscal
+                        if link_nf:
+                            st.success("📄 **Nota Fiscal Anexada!**")
+                            st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
+                        elif status_atual == "Aguardando NF":
+                            st.info("📥 **Este pedido está aguardando o envio da Nota Fiscal:**")
+                            uploaded_nf = st.file_uploader("Anexar PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
+                            if uploaded_nf and st.button("💾 Salvar NF no Drive e Marcar como Aguardando entrega", key=f"btn_save_nf_{item_id}"):
+                                with st.spinner("Enviando arquivo e organizando pasta do mês no Google Drive..."):
+                                    bytes_data = uploaded_nf.read()
+                                    nome_arquivo = f"NF_Pedido_{item_id}_{desc[:15]}.pdf"
+                                    link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
+                                    if link_drive:
+                                        supabase.table("solicitacoes_compras").update({
+                                            "link_nf": link_drive,
+                                            "status": "Aguardando entrega"
+                                        }).eq("id", item_id).execute()
+                                        st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
+                                        st.rerun()
+
+                        # Botões de Ação (4 colunas)
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            if st.button("✅ Aprovar", key=f"aprov_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Aprovado"}).eq("id", item_id).execute()
-                                st.success(f"Item #{item_id} Aprovado!")
+                            if st.button("🚚 Aguardando entrega", key=f"entreg_{item_id}"):
+                                supabase.table("solicitacoes_compras").update({"status": "Aguardando entrega"}).eq("id", item_id).execute()
                                 st.rerun()
                         with col2:
-                            if st.button("🛒 Comprado", key=f"comp_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Comprado"}).eq("id", item_id).execute()
-                                st.success(f"Item #{item_id} marcado como Comprado!")
+                            if st.button("📄 Aguardando NF", key=f"ped_nf_{item_id}"):
+                                supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
                                 st.rerun()
                         with col3:
                             if st.button("🏁 Finalizar", key=f"fin_{item_id}"):
                                 supabase.table("solicitacoes_compras").update({"status": "Finalizado"}).eq("id", item_id).execute()
-                                st.info(f"Item #{item_id} Finalizado e arquivado!")
                                 st.rerun()
                         with col4:
                             if st.button("❌ Recusar", key=f"rec_{item_id}"):
                                 supabase.table("solicitacoes_compras").update({"status": "Recusado"}).eq("id", item_id).execute()
-                                st.warning(f"Item #{item_id} Recusado!")
                                 st.rerun()
                         
                         st.divider()
