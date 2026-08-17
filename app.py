@@ -134,41 +134,53 @@ def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
 
 def salvar_nf_no_drive(file_bytes, nome_arquivo):
     try:
+        if not GOOGLE_DRIVE_FOLDER_ID:
+            st.error("❌ A variável 'GOOGLE_DRIVE_FOLDER_ID' não foi configurada nos Secrets!")
+            return None
+
+        SCOPES = ['https://www.googleapis.com/auth/drive']
+
         if os.path.exists("credentials.json"):
-            creds = Credentials.from_service_account_file(
-                "credentials.json",
-                scopes=['https://www.googleapis.com/auth/drive.file']
-            )
+            creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
         else:
             creds_raw = get_secret("GOOGLE_DRIVE_CREDENTIALS")
             if not creds_raw:
-                st.error("❌ Arquivo 'credentials.json' ou segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
+                st.error("❌ Segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
                 return None
-            
-            # Converte o objeto st.secrets para um dicionário mutável
-            if isinstance(creds_raw, str):
-                creds_json = json.loads(creds_raw)
-            elif hasattr(creds_raw, "to_dict"):
-                creds_json = creds_raw.to_dict()
-            else:
-                creds_json = dict(creds_raw)
 
-            # Sanitização robusta da private_key para restaurar a estrutura PEM
-            if "private_key" in creds_json and creds_json["private_key"]:
-                pk = str(creds_json["private_key"])
+            creds_json = None
+
+            # 1. Decodifica caso venha como Base64
+            if isinstance(creds_raw, str):
+                try:
+                    decoded_bytes = base64.b64decode(creds_raw.strip())
+                    creds_json = json.loads(decoded_bytes.decode("utf-8"))
+                except Exception:
+                    try:
+                        creds_json = json.loads(creds_raw)
+                    except Exception:
+                        pass
+
+            # 2. Tenta carregar como dicionário nativo do TOML
+            if not creds_json:
+                if hasattr(creds_raw, "to_dict"):
+                    creds_json = creds_raw.to_dict()
+                elif isinstance(creds_raw, dict):
+                    creds_json = dict(creds_raw)
+
+            if not creds_json:
+                st.error("❌ Formato de credenciais do Google Drive inválido!")
+                return None
+
+            # Sanitização de segurança da chave privada
+            if "private_key" in creds_json:
+                pk = str(creds_json["private_key"]).strip('"\'')
                 pk = pk.replace("\\n", "\n")
-                if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk:
-                    pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
-                    pk = pk.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----\n")
                 creds_json["private_key"] = pk
 
-            creds = Credentials.from_service_account_info(
-                creds_json, 
-                scopes=['https://www.googleapis.com/auth/drive.file']
-            )
+            creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
 
         service = build('drive', 'v3', credentials=creds)
-
         pasta_destino_id = obter_ou_criar_pasta_do_mes(service, GOOGLE_DRIVE_FOLDER_ID)
 
         file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
