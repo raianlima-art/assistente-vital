@@ -145,7 +145,7 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
                 st.error("❌ Arquivo 'credentials.json' ou segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
                 return None
             
-            # Converte o objeto imutável st.secrets em dicionário nativo mutável
+            # Converte o objeto st.secrets para um dicionário mutável
             if isinstance(creds_raw, str):
                 creds_json = json.loads(creds_raw)
             elif hasattr(creds_raw, "to_dict"):
@@ -153,8 +153,14 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
             else:
                 creds_json = dict(creds_raw)
 
-            if "private_key" in creds_json:
-                creds_json["private_key"] = creds_json["private_key"].replace("\\n", "\n")
+            # Sanitização robusta da private_key para restaurar a estrutura PEM
+            if "private_key" in creds_json and creds_json["private_key"]:
+                pk = str(creds_json["private_key"])
+                pk = pk.replace("\\n", "\n")
+                if "-----BEGIN PRIVATE KEY-----" in pk and "\n" not in pk:
+                    pk = pk.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
+                    pk = pk.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----\n")
+                creds_json["private_key"] = pk
 
             creds = Credentials.from_service_account_info(
                 creds_json, 
