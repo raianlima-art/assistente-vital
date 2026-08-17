@@ -292,6 +292,75 @@ with st.sidebar:
             st.session_state.is_adm = False
             st.rerun()
 
+        if supabase:
+            st.divider()
+            with st.expander("🧹 Limpeza e Exportação das Tabelas"):
+                st.info("Exporta compras finalizadas (com NF) e cotações para o Google Drive e limpa do Supabase.")
+                senha_export = st.text_input("Senha ADM:", type="password", key="senha_exp_sb")
+                
+                if st.button("🚀 Exportar e Limpar", key="btn_exp_sb"):
+                    if senha_export == ADM_PASSWORD:
+                        with st.spinner("Processando exportação..."):
+                            try:
+                                data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
+                                links_gerados = []
+
+                                resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
+                                dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
+
+                                if dados_compras:
+                                    output_c = io.StringIO()
+                                    output_c.write('\ufeff')
+                                    chaves_c = set()
+                                    for d in dados_compras: chaves_c.update(d.keys())
+                                    writer_c = csv.DictWriter(output_c, fieldnames=list(chaves_c), delimiter=';')
+                                    writer_c.writeheader()
+                                    writer_c.writerows(dados_compras)
+
+                                    link_c = salvar_nf_no_drive(
+                                        output_c.getvalue().encode('utf-8'),
+                                        f"Relatorio_Compras_{data_atual}.csv",
+                                        mime_type='text/csv'
+                                    )
+                                    if link_c:
+                                        for item in dados_compras:
+                                            supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
+                                        links_gerados.append(("Compras", link_c, len(dados_compras)))
+
+                                resp_cot = supabase.table("cotacoes").select("*").execute()
+                                dados_cot = resp_cot.data
+
+                                if dados_cot:
+                                    output_cot = io.StringIO()
+                                    output_cot.write('\ufeff')
+                                    chaves_cot = set()
+                                    for d in dados_cot: chaves_cot.update(d.keys())
+                                    writer_cot = csv.DictWriter(output_cot, fieldnames=list(chaves_cot), delimiter=';')
+                                    writer_cot.writeheader()
+                                    writer_cot.writerows(dados_cot)
+
+                                    link_cot = salvar_nf_no_drive(
+                                        output_cot.getvalue().encode('utf-8'),
+                                        f"Relatorio_Cotacoes_{data_atual}.csv",
+                                        mime_type='text/csv'
+                                    )
+                                    if link_cot:
+                                        for item in dados_cot:
+                                            supabase.table("cotacoes").delete().eq("id", item["id"]).execute()
+                                        links_gerados.append(("Cotações", link_cot, len(dados_cot)))
+
+                                if not links_gerados:
+                                    st.warning("Nenhum dado pendente encontrado.")
+                                else:
+                                    st.success("✅ Concluído!")
+                                    for titulo, link_d, qtd in links_gerados:
+                                        st.markdown(f"📊 **{titulo}:** {qtd} item(ns) — [Abrir Drive]({link_d})")
+
+                            except Exception as e:
+                                st.error(f"❌ Erro: {e}")
+                    else:
+                        st.error("❌ Senha incorreta!")
+
         st.divider()
         st.header("⚙️ Configurações Fixas")
 
@@ -717,82 +786,79 @@ if aba_gestao:
     with aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
-        # --- EXPORTAR E LIMPAR SUPABASE (AMBAS AS TABELAS) ---
         if supabase:
-            with st.expander("🧹 Limpeza e Exportação das Tabelas (Compras e Cotações)"):
-                st.info("Esta ação irá exportar os registros das tabelas **solicitacoes_compras** (pedidos finalizados com NF) e **cotacoes** em planilhas CSV enviadas diretamente para a pasta do mês no Google Drive. Após o envio bem-sucedido, os itens correspondentes serão removidos do Supabase.")
-                senha_export = st.text_input("Confirme a Senha ADM:", type="password", key="senha_exp")
-                
-                if st.button("🚀 Iniciar Exportação e Limpeza Completa", key="btn_exp"):
-                    if senha_export == ADM_PASSWORD:
-                        with st.spinner("Exportando planilhas e organizando no Google Drive..."):
-                            try:
-                                data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
-                                links_gerados = []
+            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES ---
+            try:
+                res_kpi = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute().data
+                if res_kpi:
+                    lead_times = [k.get("lead_time_dias") for k in res_kpi if k.get("lead_time_dias") is not None]
+                    lt_medio = sum(lead_times) / len(lead_times) if lead_times else 0.0
 
-                                # 1. EXPORTAR E LIMPAR SOLICITAÇÕES DE COMPRAS
-                                resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
-                                dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
+                    otifs = [k.get("otif_ok") for k in res_kpi if k.get("otif_ok") is not None]
+                    otif_pct = (sum(1 for o in otifs if o) / len(otifs) * 100) if otifs else 0.0
 
-                                if dados_compras:
-                                    output_compras = io.StringIO()
-                                    output_compras.write('\ufeff')
-                                    chaves_c = set()
-                                    for d in dados_compras: chaves_c.update(d.keys())
-                                    writer_c = csv.DictWriter(output_compras, fieldnames=list(chaves_c), delimiter=';')
-                                    writer_c.writeheader()
-                                    writer_c.writerows(dados_compras)
+                    prazos_pg = [k.get("prazo_pagamento_dias") for k in res_kpi if k.get("prazo_pagamento_dias") is not None]
+                    pmp_medio = sum(prazos_pg) / len(prazos_pg) if prazos_pg else 0.0
 
-                                    link_compras = salvar_nf_no_drive(
-                                        output_compras.getvalue().encode('utf-8'),
-                                        f"Relatorio_Solicitacoes_Compras_{data_atual}.csv",
-                                        mime_type='text/csv'
-                                    )
+                    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+                    col_kpi1.metric("⏱️ Lead Time Médio", f"{lt_medio:.1f} dias")
+                    col_kpi2.metric("🎯 OTIF / Qualidade", f"{otif_pct:.1f}%")
+                    col_kpi3.metric("💳 Prazo Médio Pagto", f"{pmp_medio:.0f} dias")
+                    st.divider()
+            except Exception:
+                pass
 
-                                    if link_compras:
-                                        for item in dados_compras:
-                                            supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
-                                        links_gerados.append(("Solicitações de Compras", link_compras, len(dados_compras)))
+            # --- FORMULÁRIO DE CADASTRO MANUAL ---
+            with st.expander("➕ Cadastrar Novo Pedido Manualmente (ADM)"):
+                with st.form("form_novo_pedido_adm"):
+                    st.markdown("#### 📦 Dados Principais")
+                    f_solic = st.text_input("Solicitante:", value="Administrador (ADM)")
+                    f_desc = st.text_input("Descrição / Nome do Item:")
+                    c_f1, c_f2 = st.columns(2)
+                    with c_f1:
+                        f_qtd = st.number_input("Quantidade:", min_value=1, value=1)
+                        f_ref = st.text_input("Referência / Modelo:")
+                    with c_f2:
+                        f_link = st.text_input("Link do Produto:")
+                        f_motivo = st.text_input("Motivo da Compra:")
 
-                                # 2. EXPORTAR E LIMPAR COTAÇÕES
-                                resp_cotacoes = supabase.table("cotacoes").select("*").execute()
-                                dados_cotacoes = resp_cotacoes.data
+                    st.markdown("#### 🛠️ Informações Complementares (Manutenção/Técnica)")
+                    c_t1, c_t2 = st.columns(2)
+                    with c_t1:
+                        f_id_manut = st.text_input("ID Manutenção:")
+                        f_compat = st.text_input("Compatível:")
+                        f_encaps = st.text_input("Encapsulamento:")
+                    with c_t2:
+                        f_custo_est = st.text_input("Custo Estimado (R$):")
+                        f_link_add = st.text_input("Link Adicional:")
+                        f_datasheet = st.text_input("Datasheet:")
 
-                                if dados_cotacoes:
-                                    output_cot = io.StringIO()
-                                    output_cot.write('\ufeff')
-                                    chaves_cot = set()
-                                    for d in dados_cotacoes: chaves_cot.update(d.keys())
-                                    writer_cot = csv.DictWriter(output_cot, fieldnames=list(chaves_cot), delimiter=';')
-                                    writer_cot.writeheader()
-                                    writer_cot.writerows(dados_cotacoes)
+                    btn_salvar_adm = st.form_submit_button("💾 Salvar Pedido no Sistema")
 
-                                    link_cotacoes = salvar_nf_no_drive(
-                                        output_cot.getvalue().encode('utf-8'),
-                                        f"Relatorio_Cotacoes_Frete_{data_atual}.csv",
-                                        mime_type='text/csv'
-                                    )
+                    if btn_salvar_adm:
+                        if not f_desc.strip():
+                            st.error("⚠️ Preencha pelo menos a descrição do item!")
+                        else:
+                            res_cad = registrar_solicitacao_compra(
+                                descricao=f_desc,
+                                link=f_link or "#",
+                                referencia=f_ref or "N/A",
+                                quantidade=f_qtd,
+                                motivo=f_motivo or "N/A",
+                                solicitante=f_solic,
+                                id_manutencao=f_id_manut,
+                                compativel=f_compat,
+                                encapsulamento=f_encaps,
+                                custo_estimado=f_custo_est,
+                                link_adicional=f_link_add,
+                                datasheet=f_datasheet
+                            )
+                            if res_cad.get("sucesso"):
+                                st.success("✅ Pedido cadastrado com sucesso!")
+                                st.rerun()
 
-                                    if link_cotacoes:
-                                        for item in dados_cotacoes:
-                                            supabase.table("cotacoes").delete().eq("id", item["id"]).execute()
-                                        links_gerados.append(("Cotações de Frete", link_cotacoes, len(dados_cotacoes)))
+            st.divider()
 
-                                # RESULTADOS
-                                if not links_gerados:
-                                    st.warning("Nenhum dado pendente de exportação encontrado nas tabelas.")
-                                else:
-                                    st.success("✅ Exportação e limpeza concluídas com sucesso!")
-                                    for titulo, link_d, qtd in links_gerados:
-                                        st.markdown(f"📊 **{titulo}:** {qtd} registro(s) exportado(s) — [Abrir no Drive]({link_d})")
-
-                            except Exception as e:
-                                st.error(f"❌ Ocorreu um erro durante a exportação/limpeza: {e}")
-                    else:
-                        st.error("❌ Senha incorreta!")
-        st.divider()
-        # ----------------------------------
-        
         if not supabase:
             st.warning("⚠️ O Supabase não está conectado.")
         else:
@@ -832,6 +898,7 @@ if aba_gestao:
                     encaps = item.get("encapsulamento")
                     custo_est = item.get("custo_estimado")
                     num_pedido = item.get("numero_pedido")
+                    fornecedor = item.get("fornecedor_vencedor")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
@@ -848,8 +915,8 @@ if aba_gestao:
                     rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
                     campos_extra_adm = ""
-                    if num_pedido:
-                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido de Compra:</b> {num_pedido}</p>'
+                    if num_pedido or fornecedor:
+                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"}</p>'
                     if id_manut or compat or encaps or custo_est:
                         campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
@@ -900,9 +967,51 @@ if aba_gestao:
                                             st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                             st.rerun()
 
-                        col1, col2, col3, col4 = st.columns(4)
-                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        # --- EXPANDER PARA DADOS DE DESEMPENHO AO FINALIZAR ---
+                        with st.expander("🏁 Registrar Dados de Entrega / Finalizar"):
+                            with st.form(f"form_fin_{item_id}"):
+                                c_fin1, c_fin2 = st.columns(2)
+                                with c_fin1:
+                                    f_fornec = st.text_input("Fornecedor Vencedor:", value=fornecedor or "")
+                                    f_dt_prometida = st.date_input("Data Prometida de Entrega:", value=datetime.date.today())
+                                    f_qualidade = st.selectbox("Qualidade OK (Sem defeitos)?", ["SIM", "NÃO"])
+                                with c_fin2:
+                                    f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today())
+                                    f_paz_pg = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30)
+                                
+                                btn_confirm_fin = st.form_submit_button("✅ Finalizar Pedido com Métricas")
 
+                                if btn_confirm_fin:
+                                    if not f_fornec.strip():
+                                        st.error("⚠️ Informe o nome do Fornecedor Vencedor!")
+                                    else:
+                                        try:
+                                            dt_inicio = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+                                        except Exception:
+                                            dt_inicio = datetime.date.today()
+                                        
+                                        lead_time = (f_dt_entregue - dt_inicio).days
+                                        no_prazo = f_dt_entregue <= f_dt_prometida
+                                        otif = no_prazo and (f_qualidade == "SIM")
+                                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+                                        supabase.table("solicitacoes_compras").update({
+                                            "status": "Finalizado",
+                                            "data_finalizacao": now_iso,
+                                            "fornecedor_vencedor": f_fornec,
+                                            "data_prometida": f_dt_prometida.isoformat(),
+                                            "data_entregue": f_dt_entregue.isoformat(),
+                                            "qualidade_ok": f_qualidade,
+                                            "prazo_pagamento_dias": f_paz_pg,
+                                            "lead_time_dias": lead_time,
+                                            "otif_ok": otif
+                                        }).eq("id", item_id).execute()
+
+                                        st.success("🏁 Pedido finalizado e métricas calculadas!")
+                                        st.rerun()
+
+                        # BOTÕES DE AÇÃO RÁPIDA
+                        col1, col2, col3 = st.columns(3)
                         with col1:
                             if st.button("🚚 Aguardando entrega", key=f"entreg_{item_id}"):
                                 supabase.table("solicitacoes_compras").update({"status": "Aguardando entrega"}).eq("id", item_id).execute()
@@ -912,14 +1021,8 @@ if aba_gestao:
                                 supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
                                 st.rerun()
                         with col3:
-                            if st.button("🏁 Finalizar", key=f"fin_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({
-                                    "status": "Finalizado",
-                                    "data_finalizacao": now_iso
-                                }).eq("id", item_id).execute()
-                                st.rerun()
-                        with col4:
                             if st.button("❌ Recusar", key=f"rec_{item_id}"):
+                                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                                 supabase.table("solicitacoes_compras").update({
                                     "status": "Recusado",
                                     "data_finalizacao": now_iso
