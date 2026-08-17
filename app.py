@@ -4,6 +4,7 @@ import io
 import json
 import os
 import smtplib
+import unicodedata
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import streamlit as st
@@ -69,6 +70,12 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
 # -----------------------------------------------------------------------------
 # 3. FUNÇÕES DE SUPORTE E CÁLCULO DE TEMPO
 # -----------------------------------------------------------------------------
+def normalizar_texto(texto):
+    if not texto:
+        return ""
+    nfkd = unicodedata.normalize("NFD", str(texto))
+    return "".join([c for c in nfkd if not unicodedata.combining(c)]).lower().strip()
+
 def formatar_tempo_decorrido(data_inicio_str, data_fim_str=None):
     if not data_inicio_str:
         return "Data indisponível"
@@ -150,7 +157,6 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
 
             creds_json = None
 
-            # 1. Decodifica caso venha como Base64
             if isinstance(creds_raw, str):
                 try:
                     decoded_bytes = base64.b64decode(creds_raw.strip())
@@ -161,7 +167,6 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
                     except Exception:
                         pass
 
-            # 2. Tenta carregar como dicionário nativo do TOML
             if not creds_json:
                 if hasattr(creds_raw, "to_dict"):
                     creds_json = creds_raw.to_dict()
@@ -172,7 +177,6 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
                 st.error("❌ Formato de credenciais do Google Drive inválido!")
                 return None
 
-            # Sanitização de segurança da chave privada
             if "private_key" in creds_json:
                 pk = str(creds_json["private_key"]).strip('"\'')
                 pk = pk.replace("\\n", "\n")
@@ -312,10 +316,23 @@ custo_fixo_diaria = (ipva + seguro + manut_anual) / dias_uteis
 # -----------------------------------------------------------------------------
 # 7. FUNÇÃO DE ENVIO DE E-MAIL
 # -----------------------------------------------------------------------------
-def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante):
+def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante,
+                             id_manutencao=None, compativel=None, encapsulamento=None, 
+                             custo_estimado=None, link_adicional=None, datasheet=None):
     if not EMAIL_REMETENTE or not EMAIL_SENHA_APP or not EMAIL_DESTINATARIO:
         print("⚠️ Dados de e-mail não preenchidos.")
         return False
+
+    campos_fabiano_html = ""
+    if any([id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet]):
+        campos_fabiano_html = f"""
+        <li><strong>ID Manutenção:</strong> {id_manutencao or 'N/A'}</li>
+        <li><strong>Compatível:</strong> {compativel or 'N/A'}</li>
+        <li><strong>Encapsulamento:</strong> {encapsulamento or 'N/A'}</li>
+        <li><strong>Custo Estimado:</strong> {custo_estimado or 'N/A'}</li>
+        <li><strong>Link Adicional:</strong> {f'<a href="{link_adicional}">Ver Link</a>' if link_adicional else 'N/A'}</li>
+        <li><strong>Datasheet:</strong> {f'<a href="{datasheet}">Ver Datasheet</a>' if datasheet else 'N/A'}</li>
+        """
 
     msg = MIMEMultipart()
     msg['From'] = EMAIL_REMETENTE
@@ -331,6 +348,7 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
         <li><strong>Quantidade:</strong> {quantidade} un.</li>
         <li><strong>Detalhe:</strong> {referencia} (<a href="{link}">Ver Produto</a>)</li>
         <li><strong>Motivo:</strong> {motivo}</li>
+        {campos_fabiano_html}
     </ul>
     <hr>
     <p><small>Este e-mail foi gerado automaticamente pelo Assistente Integrado Vital.</small></p>
@@ -407,27 +425,42 @@ def calcular_frete_ia(origem, destino, tipo_trajeto, dias_por_trecho, is_viagem_
         "preco_final": preco_final
     }
 
-def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo, solicitante):
+def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo, solicitante,
+                                 id_manutencao=None, compativel=None, encapsulamento=None, 
+                                 custo_estimado=None, link_adicional=None, datasheet=None):
     if supabase:
+        payload = {
+            "item_descricao": descricao,
+            "link_produto": link,
+            "referencia": referencia,
+            "quantidade": int(quantidade),
+            "motivo": motivo,
+            "solicitante": solicitante,
+            "status": "Pendente",
+            "id_manutencao": id_manutencao,
+            "compativel": compativel,
+            "encapsulamento": encapsulamento,
+            "custo_estimado": custo_estimado,
+            "link_adicional": link_adicional,
+            "datasheet": datasheet
+        }
         try:
-            supabase.table("solicitacoes_compras").insert({
-                "item_descricao": descricao,
+            supabase.table("solicitacoes_compras").insert(payload).execute()
+        except Exception:
+            extra_text = f" | ID Manut: {id_manutencao} | Compativel: {compativel} | Encapsulamento: {encapsulamento} | Custo Est: {custo_estimado}"
+            payload_fallback = {
+                "item_descricao": f"{descricao} {extra_text}",
                 "link_produto": link,
                 "referencia": referencia,
                 "quantidade": int(quantidade),
                 "motivo": motivo,
                 "solicitante": solicitante,
                 "status": "Pendente"
-            }).execute()
-        except Exception:
-            desc_completa = f"{descricao} | Ref: {referencia} | Qtd: {quantidade} | Motivo: {motivo} | Solicitante: {solicitante}"
-            supabase.table("solicitacoes_compras").insert({
-                "item_descricao": desc_completa,
-                "link_produto": link,
-                "status": "Pendente"
-            }).execute()
+            }
+            supabase.table("solicitacoes_compras").insert(payload_fallback).execute()
             
-    enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante)
+    enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante,
+                             id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet)
     return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
 
 # -----------------------------------------------------------------------------
@@ -456,15 +489,21 @@ tools = [
         "type": "function",
         "function": {
             "name": "registrar_solicitacao_compra",
-            "description": "Registra um pedido de compra APÓS obter do usuário: descrição do item, link, referência, quantidade e motivo.",
+            "description": "Registra um pedido de compra no sistema.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "descricao": {"type": "string", "description": "Nome resumido e claro do produto"},
-                    "link": {"type": "string", "description": "URL/Link de compra do produto"},
-                    "referencia": {"type": "string", "description": "Modelo, código ou especificação do produto"},
+                    "descricao": {"type": "string", "description": "Nome resumido do produto"},
+                    "link": {"type": "string", "description": "URL/Link do produto"},
+                    "referencia": {"type": "string", "description": "Modelo, código ou especificação"},
                     "quantidade": {"type": "integer", "description": "Quantidade de itens"},
-                    "motivo": {"type": "string", "description": "Motivo/justificativa da compra"}
+                    "motivo": {"type": "string", "description": "Motivo da compra"},
+                    "id_manutencao": {"type": "string", "description": "ID Manutenção (solicitado se o usuário for o Fabiano)"},
+                    "compativel": {"type": "string", "description": "Compatibilidade com equipamento (solicitado se o usuário for o Fabiano)"},
+                    "encapsulamento": {"type": "string", "description": "Encapsulamento do componente (solicitado se o usuário for o Fabiano)"},
+                    "custo_estimado": {"type": "string", "description": "Custo estimado R$ (solicitado se o usuário for o Fabiano)"},
+                    "link_adicional": {"type": "string", "description": "Link adicional (solicitado se o usuário for o Fabiano)"},
+                    "datasheet": {"type": "string", "description": "Link ou PDF do Datasheet (solicitado se o usuário for o Fabiano)"}
                 },
                 "required": ["descricao", "link", "referencia", "quantidade", "motivo"]
             }
@@ -488,6 +527,22 @@ else:
 # =============================================================================
 with aba_chat:
     solicitante_atual = st.session_state.solicitante_str
+    is_fabiano = "fabiano" in normalizar_texto(solicitante_atual)
+
+    regras_fabiano = ""
+    if is_fabiano:
+        regras_fabiano = """
+⚠️ REGRA ESPECIAL PARA O USUÁRIO FABIANO:
+Como o solicitante é o Fabiano, você DEVE solicitar obrigatoriamente os seguintes campos adicionais antes de registrar a compra:
+1. ID Manutenção
+2. Compatível (com qual equipamento/máquina)
+3. Encapsulamento
+4. Custo estimado (R$)
+5. Link adicional
+6. Datasheet (link ou arquivo/PDF)
+
+Não finalize a solicitação com a ferramenta 'registrar_solicitacao_compra' sem antes perguntar e obter esses 6 dados adicionais do Fabiano.
+"""
 
     system_prompt = f"""
 Você é o Assistente Integrado Vital, o sistema inteligente oficial da Vital Logística.
@@ -499,13 +554,15 @@ Suas atribuições principais são:
 
 2. SOLICITAR COMPRAS: Quando o usuário enviar uma foto, link ou pedir para comprar um item:
    - Você JÁ SABE quem é o solicitante ({solicitante_atual}), portanto NUNCA PERGUNTE O NOME DO USUÁRIO no chat!
-   - Solicite apenas as informações do produto que faltarem:
+   - Solicite as informações básicas do produto que faltarem:
      1. Link de compra/referência
      2. Código de Referência / Modelo
      3. Quantidade
      4. Motivo da compra
-   - Assim que possuir as 4 informações do produto, invoque 'registrar_solicitacao_compra'.
 
+{regras_fabiano}
+
+Assim que possuir TODAS as informações necessárias, invoque 'registrar_solicitacao_compra'.
 Seja cortês, profissional e objetivo.
 """
 
@@ -603,11 +660,23 @@ Seja cortês, profissional e objetivo.
                             referencia=args.get("referencia"),
                             quantidade=args.get("quantidade"),
                             motivo=args.get("motivo"),
-                            solicitante=solicitante_atual
+                            solicitante=solicitante_atual,
+                            id_manutencao=args.get("id_manutencao"),
+                            compativel=args.get("compativel"),
+                            encapsulamento=args.get("encapsulamento"),
+                            custo_estimado=args.get("custo_estimado"),
+                            link_adicional=args.get("link_adicional"),
+                            datasheet=args.get("datasheet")
                         )
                         if "sucesso" in resultado:
                             link_url = args.get('link', '#')
                             link_html = f' — <a href="{link_url}" target="_blank" style="color: #0284c7; font-weight: 600; text-decoration: underline;">Ver Produto 🔗</a>' if link_url and link_url != '#' else ''
+                            
+                            extra_info = ""
+                            if args.get("id_manutencao"):
+                                extra_info += f"<div><b>🛠️ ID Manutenção:</b> {args.get('id_manutencao')} | <b>🧩 Compatível:</b> {args.get('compativel', 'N/A')}</div>"
+                                extra_info += f"<div><b>📦 Encapsulamento:</b> {args.get('encapsulamento', 'N/A')} | <b>💰 Custo Est.:</b> {args.get('custo_estimado', 'N/A')}</div>"
+
                             card_html_gerado = f"""<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
 <h4 style="margin: 0 0 12px 0; color: #166534; font-size: 1.1rem;">🛒 Compra Registrada com Sucesso!</h4>
 <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; color: #14532d;">
@@ -616,6 +685,7 @@ Seja cortês, profissional e objetivo.
 <div><b>🔢 Quantidade:</b> {args.get('quantidade')} un.</div>
 <div><b>📋 Detalhe:</b> {args.get('referencia')}{link_html}</div>
 <div><b>🎯 Motivo:</b> {args.get('motivo')}</div>
+{extra_info}
 </div>
 </div>"""
 
@@ -680,6 +750,11 @@ if aba_gestao:
                     created_at = item.get("created_at")
                     data_finalizacao = item.get("data_finalizacao")
 
+                    id_manut = item.get("id_manutencao")
+                    compat = item.get("compativel")
+                    encaps = item.get("encapsulamento")
+                    custo_est = item.get("custo_estimado")
+
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
                     elif status_atual == "Aguardando entrega":
@@ -691,26 +766,29 @@ if aba_gestao:
                     else:
                         cor_borda = "#ef4444"
 
-                    # Cálculo do tempo de duração do pedido
                     tempo_str = formatar_tempo_decorrido(created_at, data_finalizacao)
                     rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
-                    with st.container():
-                        st.markdown(f"""
-                        <div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>
-                                <span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>
-                            </div>
-                            <p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>
-                            <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
-                            <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>
-                            <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>
-                            <p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    campos_extra_adm = ""
+                    if id_manut or compat or encaps or custo_est:
+                        campos_extra_adm = f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
-                        # Exibição / Anexo da Nota Fiscal
+                    card_html = f"""<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>
+<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>
+</div>
+<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>
+<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
+<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>
+{campos_extra_adm}
+<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>
+<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>
+</div>"""
+
+                    with st.container():
+                        st.markdown(card_html, unsafe_allow_html=True)
+
                         if link_nf:
                             st.success("📄 **Nota Fiscal Anexada!**")
                             st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
@@ -730,7 +808,6 @@ if aba_gestao:
                                         st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                         st.rerun()
 
-                        # Botões de Ação
                         col1, col2, col3, col4 = st.columns(4)
                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
