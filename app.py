@@ -43,7 +43,7 @@ GOOGLE_DRIVE_FOLDER_ID = get_secret("GOOGLE_DRIVE_FOLDER_ID", "")
 LOGO_PATH = "logo.png"
 
 # -----------------------------------------------------------------------------
-# 2. CONFIGURAÇÃO DA PÁGINA
+# 2. CONFIGURAÇÃO DA PÁGINA E CLIENTES DE API
 # -----------------------------------------------------------------------------
 pagina_icone = LOGO_PATH if os.path.exists(LOGO_PATH) else "🤖"
 
@@ -67,7 +67,37 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
         st.sidebar.warning(f"⚠️ Supabase offline: {e}")
 
 # -----------------------------------------------------------------------------
-# 3. FUNÇÕES DE UPLOAD PARA O GOOGLE DRIVE (COMPARTILHADO + PASTA POR MÊS)
+# 3. FUNÇÕES DE SUPORTE E CÁLCULO DE TEMPO
+# -----------------------------------------------------------------------------
+def formatar_tempo_decorrido(data_inicio_str, data_fim_str=None):
+    if not data_inicio_str:
+        return "Data indisponível"
+    try:
+        data_inicio_clean = data_inicio_str.replace("Z", "+00:00")
+        inicio = datetime.datetime.fromisoformat(data_inicio_clean)
+
+        if data_fim_str:
+            data_fim_clean = data_fim_str.replace("Z", "+00:00")
+            fim = datetime.datetime.fromisoformat(data_fim_clean)
+        else:
+            fim = datetime.datetime.now(datetime.timezone.utc)
+
+        diff = fim - inicio
+        dias = diff.days
+        horas = diff.seconds // 3600
+        minutos = (diff.seconds % 3600) // 60
+
+        if dias > 0:
+            return f"{dias}d {horas}h"
+        elif horas > 0:
+            return f"{horas}h {minutos}min"
+        else:
+            return f"{minutos} min"
+    except Exception:
+        return "Tempo n/d"
+
+# -----------------------------------------------------------------------------
+# 4. FUNÇÕES DE UPLOAD PARA O GOOGLE DRIVE
 # -----------------------------------------------------------------------------
 def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
     hoje = datetime.datetime.now()
@@ -115,10 +145,13 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
                 st.error("❌ Arquivo 'credentials.json' ou segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
                 return None
             
+            # Converte o objeto imutável st.secrets em dicionário nativo mutável
             if isinstance(creds_raw, str):
                 creds_json = json.loads(creds_raw)
+            elif hasattr(creds_raw, "to_dict"):
+                creds_json = creds_raw.to_dict()
             else:
-                creds_json = creds_raw
+                creds_json = dict(creds_raw)
 
             if "private_key" in creds_json:
                 creds_json["private_key"] = creds_json["private_key"].replace("\\n", "\n")
@@ -148,7 +181,7 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
         return None
 
 # -----------------------------------------------------------------------------
-# 4. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM
+# 5. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM
 # -----------------------------------------------------------------------------
 if "usuario_identificado" not in st.session_state:
     st.session_state.usuario_identificado = False
@@ -161,7 +194,6 @@ if not st.session_state.usuario_identificado:
     st.markdown("### 👤 Identificação do Solicitante")
     st.info("Por favor, informe seus dados para iniciar ou acesse diretamente como Administrador.")
 
-    # Formulário Padrão de Usuário
     with st.form("form_identificacao"):
         nome_user = st.text_input("Seu Nome Completo:")
         setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Manutenção, Frota, Compras...")
@@ -181,7 +213,6 @@ if not st.session_state.usuario_identificado:
 
     st.divider()
 
-    # Acesso Direto para ADM (Sem Identificação de Usuário)
     with st.expander("🔑 Acesso Direto para Administradores (Painel ADM)", expanded=True):
         with st.form("form_adm_direto"):
             senha_adm_direta = st.text_input("Senha do Administrador:", type="password")
@@ -200,7 +231,7 @@ if not st.session_state.usuario_identificado:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 5. BARRA LATERAL
+# 6. BARRA LATERAL
 # -----------------------------------------------------------------------------
 ipva = 10000.0
 seguro = 10000.0
@@ -261,7 +292,7 @@ with st.sidebar:
 custo_fixo_diaria = (ipva + seguro + manut_anual) / dias_uteis
 
 # -----------------------------------------------------------------------------
-# 6. FUNÇÃO DE ENVIO DE E-MAIL
+# 7. FUNÇÃO DE ENVIO DE E-MAIL
 # -----------------------------------------------------------------------------
 def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante):
     if not EMAIL_REMETENTE or not EMAIL_SENHA_APP or not EMAIL_DESTINATARIO:
@@ -299,7 +330,7 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
         return False
 
 # -----------------------------------------------------------------------------
-# 7. FUNÇÕES DE SUPORTE E CÁLCULO
+# 8. FUNÇÕES DE SUPORTE E CÁLCULO
 # -----------------------------------------------------------------------------
 @st.cache_data(show_spinner="Consultando mapa...")
 def obter_localizacao(cidade):
@@ -382,7 +413,7 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
     return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
 
 # -----------------------------------------------------------------------------
-# 8. FERRAMENTAS DA IA (TOOLS)
+# 9. FERRAMENTAS DA IA (TOOLS)
 # -----------------------------------------------------------------------------
 tools = [
     {
@@ -424,7 +455,7 @@ tools = [
 ]
 
 # -----------------------------------------------------------------------------
-# 9. INTERFACE PRINCIPAL E ABAS
+# 10. INTERFACE PRINCIPAL E ABAS
 # -----------------------------------------------------------------------------
 st.title("🤖 Assistente Integrado Vital")
 
@@ -628,6 +659,8 @@ if aba_gestao:
                     link = item.get("link_produto", "#")
                     status_atual = item.get("status", "Pendente")
                     link_nf = item.get("link_nf")
+                    created_at = item.get("created_at")
+                    data_finalizacao = item.get("data_finalizacao")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
@@ -640,6 +673,10 @@ if aba_gestao:
                     else:
                         cor_borda = "#ef4444"
 
+                    # Cálculo do tempo de duração do pedido
+                    tempo_str = formatar_tempo_decorrido(created_at, data_finalizacao)
+                    rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
+
                     with st.container():
                         st.markdown(f"""
                         <div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
@@ -650,6 +687,7 @@ if aba_gestao:
                             <p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>
                             <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
                             <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>
+                            <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>
                             <p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>
                         </div>
                         """, unsafe_allow_html=True)
@@ -674,8 +712,10 @@ if aba_gestao:
                                         st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                         st.rerun()
 
-                        # Botões de Ação (4 colunas)
+                        # Botões de Ação
                         col1, col2, col3, col4 = st.columns(4)
+                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
                         with col1:
                             if st.button("🚚 Aguardando entrega", key=f"entreg_{item_id}"):
                                 supabase.table("solicitacoes_compras").update({"status": "Aguardando entrega"}).eq("id", item_id).execute()
@@ -686,11 +726,17 @@ if aba_gestao:
                                 st.rerun()
                         with col3:
                             if st.button("🏁 Finalizar", key=f"fin_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Finalizado"}).eq("id", item_id).execute()
+                                supabase.table("solicitacoes_compras").update({
+                                    "status": "Finalizado",
+                                    "data_finalizacao": now_iso
+                                }).eq("id", item_id).execute()
                                 st.rerun()
                         with col4:
                             if st.button("❌ Recusar", key=f"rec_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Recusado"}).eq("id", item_id).execute()
+                                supabase.table("solicitacoes_compras").update({
+                                    "status": "Recusado",
+                                    "data_finalizacao": now_iso
+                                }).eq("id", item_id).execute()
                                 st.rerun()
                         
                         st.divider()
