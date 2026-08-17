@@ -496,7 +496,7 @@ tools = [
                     "descricao": {"type": "string", "description": "Nome resumido do produto"},
                     "link": {"type": "string", "description": "URL/Link do produto"},
                     "referencia": {"type": "string", "description": "Modelo, código ou especificação"},
-                    "quantidade": {"type": "integer", "description": "Quantidade de itens"},
+                    "quantidade": {"type": "integer", "description": "Quantidade de items"},
                     "motivo": {"type": "string", "description": "Motivo da compra"},
                     "id_manutencao": {"type": "string", "description": "ID Manutenção (solicitado se o usuário for o Fabiano)"},
                     "compativel": {"type": "string", "description": "Compatibilidade com equipamento (solicitado se o usuário for o Fabiano)"},
@@ -754,6 +754,7 @@ if aba_gestao:
                     compat = item.get("compativel")
                     encaps = item.get("encapsulamento")
                     custo_est = item.get("custo_estimado")
+                    num_pedido = item.get("numero_pedido")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
@@ -770,8 +771,10 @@ if aba_gestao:
                     rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
                     campos_extra_adm = ""
+                    if num_pedido:
+                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido de Compra:</b> {num_pedido}</p>'
                     if id_manut or compat or encaps or custo_est:
-                        campos_extra_adm = f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
+                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
                     card_html = f"""<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -794,19 +797,34 @@ if aba_gestao:
                             st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
                         elif status_atual == "Aguardando NF":
                             st.info("📥 **Este pedido está aguardando o envio da Nota Fiscal:**")
+                            
+                            # NOVO CAMPO: Solicita o número do pedido
+                            num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", key=f"input_ped_{item_id}")
                             uploaded_nf = st.file_uploader("Anexar PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
-                            if uploaded_nf and st.button("💾 Salvar NF no Drive e Marcar como Aguardando entrega", key=f"btn_save_nf_{item_id}"):
-                                with st.spinner("Enviando arquivo e organizando pasta do mês no Google Drive..."):
-                                    bytes_data = uploaded_nf.read()
-                                    nome_arquivo = f"NF_Pedido_{item_id}_{desc[:15]}.pdf"
-                                    link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
-                                    if link_drive:
-                                        supabase.table("solicitacoes_compras").update({
-                                            "link_nf": link_drive,
-                                            "status": "Aguardando entrega"
-                                        }).eq("id", item_id).execute()
-                                        st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
-                                        st.rerun()
+                            
+                            if st.button("💾 Salvar NF no Drive e Marcar como Aguardando entrega", key=f"btn_save_nf_{item_id}"):
+                                if not num_pedido_input.strip():
+                                    st.error("⚠️ Por favor, preencha o Número do Pedido de Compra antes de salvar!")
+                                elif not uploaded_nf:
+                                    st.error("⚠️ Por favor, anexe o PDF da Nota Fiscal!")
+                                else:
+                                    with st.spinner("Enviando arquivo e organizando pasta do mês no Google Drive..."):
+                                        bytes_data = uploaded_nf.read()
+                                        
+                                        # Monta o nome do arquivo incluindo o número do pedido
+                                        desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                        nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                        
+                                        link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
+                                        if link_drive:
+                                            # Salva o arquivo e cadastra o número do pedido no banco de dados
+                                            supabase.table("solicitacoes_compras").update({
+                                                "link_nf": link_drive,
+                                                "status": "Aguardando entrega",
+                                                "numero_pedido": num_pedido_input.strip()
+                                            }).eq("id", item_id).execute()
+                                            st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
+                                            st.rerun()
 
                         col1, col2, col3, col4 = st.columns(4)
                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
