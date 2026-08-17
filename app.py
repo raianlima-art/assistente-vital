@@ -1,4 +1,5 @@
 import base64
+import csv
 import datetime
 import io
 import json
@@ -139,7 +140,7 @@ def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
         return pasta_criada.get('id')
 
 
-def salvar_nf_no_drive(file_bytes, nome_arquivo):
+def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf'):
     try:
         if not GOOGLE_DRIVE_FOLDER_ID:
             st.error("❌ A variável 'GOOGLE_DRIVE_FOLDER_ID' não foi configurada nos Secrets!")
@@ -188,7 +189,7 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo):
         pasta_destino_id = obter_ou_criar_pasta_do_mes(service, GOOGLE_DRIVE_FOLDER_ID)
 
         file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
-        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype='application/pdf', resumable=True)
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         
         file = service.files().create(
             body=file_metadata, 
@@ -716,6 +717,82 @@ if aba_gestao:
     with aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
+        # --- EXPORTAR E LIMPAR SUPABASE (AMBAS AS TABELAS) ---
+        if supabase:
+            with st.expander("🧹 Limpeza e Exportação das Tabelas (Compras e Cotações)"):
+                st.info("Esta ação irá exportar os registros das tabelas **solicitacoes_compras** (pedidos finalizados com NF) e **cotacoes** em planilhas CSV enviadas diretamente para a pasta do mês no Google Drive. Após o envio bem-sucedido, os itens correspondentes serão removidos do Supabase.")
+                senha_export = st.text_input("Confirme a Senha ADM:", type="password", key="senha_exp")
+                
+                if st.button("🚀 Iniciar Exportação e Limpeza Completa", key="btn_exp"):
+                    if senha_export == ADM_PASSWORD:
+                        with st.spinner("Exportando planilhas e organizando no Google Drive..."):
+                            try:
+                                data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
+                                links_gerados = []
+
+                                # 1. EXPORTAR E LIMPAR SOLICITAÇÕES DE COMPRAS
+                                resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
+                                dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
+
+                                if dados_compras:
+                                    output_compras = io.StringIO()
+                                    output_compras.write('\ufeff')
+                                    chaves_c = set()
+                                    for d in dados_compras: chaves_c.update(d.keys())
+                                    writer_c = csv.DictWriter(output_compras, fieldnames=list(chaves_c), delimiter=';')
+                                    writer_c.writeheader()
+                                    writer_c.writerows(dados_compras)
+
+                                    link_compras = salvar_nf_no_drive(
+                                        output_compras.getvalue().encode('utf-8'),
+                                        f"Relatorio_Solicitacoes_Compras_{data_atual}.csv",
+                                        mime_type='text/csv'
+                                    )
+
+                                    if link_compras:
+                                        for item in dados_compras:
+                                            supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
+                                        links_gerados.append(("Solicitações de Compras", link_compras, len(dados_compras)))
+
+                                # 2. EXPORTAR E LIMPAR COTAÇÕES
+                                resp_cotacoes = supabase.table("cotacoes").select("*").execute()
+                                dados_cotacoes = resp_cotacoes.data
+
+                                if dados_cotacoes:
+                                    output_cot = io.StringIO()
+                                    output_cot.write('\ufeff')
+                                    chaves_cot = set()
+                                    for d in dados_cotacoes: chaves_cot.update(d.keys())
+                                    writer_cot = csv.DictWriter(output_cot, fieldnames=list(chaves_cot), delimiter=';')
+                                    writer_cot.writeheader()
+                                    writer_cot.writerows(dados_cotacoes)
+
+                                    link_cotacoes = salvar_nf_no_drive(
+                                        output_cot.getvalue().encode('utf-8'),
+                                        f"Relatorio_Cotacoes_Frete_{data_atual}.csv",
+                                        mime_type='text/csv'
+                                    )
+
+                                    if link_cotacoes:
+                                        for item in dados_cotacoes:
+                                            supabase.table("cotacoes").delete().eq("id", item["id"]).execute()
+                                        links_gerados.append(("Cotações de Frete", link_cotacoes, len(dados_cotacoes)))
+
+                                # RESULTADOS
+                                if not links_gerados:
+                                    st.warning("Nenhum dado pendente de exportação encontrado nas tabelas.")
+                                else:
+                                    st.success("✅ Exportação e limpeza concluídas com sucesso!")
+                                    for titulo, link_d, qtd in links_gerados:
+                                        st.markdown(f"📊 **{titulo}:** {qtd} registro(s) exportado(s) — [Abrir no Drive]({link_d})")
+
+                            except Exception as e:
+                                st.error(f"❌ Ocorreu um erro durante a exportação/limpeza: {e}")
+                    else:
+                        st.error("❌ Senha incorreta!")
+        st.divider()
+        # ----------------------------------
+        
         if not supabase:
             st.warning("⚠️ O Supabase não está conectado.")
         else:
@@ -798,7 +875,6 @@ if aba_gestao:
                         elif status_atual == "Aguardando NF":
                             st.info("📥 **Este pedido está aguardando o envio da Nota Fiscal:**")
                             
-                            # NOVO CAMPO: Solicita o número do pedido
                             num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", key=f"input_ped_{item_id}")
                             uploaded_nf = st.file_uploader("Anexar PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
                             
@@ -811,13 +887,11 @@ if aba_gestao:
                                     with st.spinner("Enviando arquivo e organizando pasta do mês no Google Drive..."):
                                         bytes_data = uploaded_nf.read()
                                         
-                                        # Monta o nome do arquivo incluindo o número do pedido
                                         desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
                                         nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
                                         
                                         link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
                                         if link_drive:
-                                            # Salva o arquivo e cadastra o número do pedido no banco de dados
                                             supabase.table("solicitacoes_compras").update({
                                                 "link_nf": link_drive,
                                                 "status": "Aguardando entrega",
