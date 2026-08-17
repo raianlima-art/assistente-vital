@@ -3,3 +3,5 @@ openai
 supabase
 python-dotenv
 geopy
+google-auth
+google-api-python-client
