@@ -45,15 +45,115 @@ GOOGLE_DRIVE_FOLDER_ID = get_secret("GOOGLE_DRIVE_FOLDER_ID", "")
 LOGO_PATH = "logo.png"
 
 # -----------------------------------------------------------------------------
-# 2. CONFIGURAÇÃO DA PÁGINA E CLIENTES DE API
+# 2. CONFIGURAÇÃO DA PÁGINA E CSS CUSTOMIZADO
 # -----------------------------------------------------------------------------
 pagina_icone = LOGO_PATH if os.path.exists(LOGO_PATH) else "🤖"
 
 st.set_page_config(
     page_title="Assistente Integrado Vital", 
     page_icon=pagina_icone, 
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="expanded"
 )
+
+# --- INJEÇÃO DE CSS GLOBAL PARA UM VISUAL MODERNO ---
+custom_css = """
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Botões Globais */
+    div.stButton > button:first-child {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+        width: 100%;
+    }
+    
+    div.stButton > button:first-child:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(42, 82, 152, 0.25);
+        color: white;
+    }
+
+    /* Inputs e Caixas de Texto */
+    .stTextInput input, .stNumberInput input, .stSelectbox > div > div {
+        border-radius: 8px !important;
+        border: 1px solid #cbd5e1 !important;
+        background-color: #ffffff !important;
+        transition: all 0.2s ease-in-out;
+    }
+    
+    .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox > div > div:focus-within {
+        border-color: #2a5298 !important;
+        box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
+    }
+
+    /* Barra Lateral (Sidebar) */
+    [data-testid="stSidebar"] {
+        background-color: #f8fafc;
+        border-right: 1px solid #e2e8f0;
+    }
+
+    /* Estilização Avançada dos Expanders (Configurações Fixas) */
+    [data-testid="stExpander"] {
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 10px !important;
+        background-color: #ffffff !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
+        transition: all 0.2s ease;
+    }
+
+    [data-testid="stExpander"]:hover {
+        border-color: #cbd5e1 !important;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.05) !important;
+    }
+
+    .streamlit-expanderHeader {
+        font-weight: 600 !important;
+        color: #1e293b !important;
+        border-radius: 10px !important;
+        padding: 0.6rem 0.8rem !important;
+    }
+
+    /* Abas (Tabs) */
+    [data-baseweb="tab-list"] {
+        gap: 20px;
+    }
+    [data-baseweb="tab"] {
+        font-weight: 600;
+        padding: 10px 0;
+    }
+    [data-baseweb="tab"][aria-selected="true"] {
+        color: #2a5298;
+    }
+
+    /* Chat Messages */
+    .stChatMessage {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        margin-bottom: 15px;
+    }
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
 
 if not API_KEY_OPENAI:
     st.error("❌ A chave 'OPENAI_API_KEY' não foi encontrada! Verifique o .env ou o Secrets do Streamlit.")
@@ -184,7 +284,6 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf', as
 
         service = build('drive', 'v3', credentials=creds)
         
-        # Se não enviou o nome da subpasta, usa o mês/ano atual por padrão
         if not nome_subpasta:
             nome_subpasta = datetime.datetime.now().strftime("%m-%Y")
             
@@ -192,7 +291,6 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf', as
 
         file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
         
-        # Converte para Google Docs se solicitado
         if as_google_doc:
             file_metadata['mimeType'] = 'application/vnd.google-apps.document'
             
@@ -866,7 +964,7 @@ if aba_gestao:
                                     nome_arq, 
                                     mime_type='text/plain',
                                     as_google_doc=True,
-                                    nome_subpasta="Relatórios IA" # <--- Agora ele salva nesta pasta específica
+                                    nome_subpasta="Relatórios IA"
                                 )
                                 
                                 if link_relatorio:
