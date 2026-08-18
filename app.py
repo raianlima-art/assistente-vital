@@ -40,6 +40,7 @@ EMAIL_SENHA_APP = get_secret("EMAIL_SENHA_APP")
 EMAIL_DESTINATARIO = get_secret("EMAIL_DESTINATARIO")
 
 ADM_PASSWORD = get_secret("ADM_PASSWORD", "admin123")
+ESTOQUE_PASSWORD = get_secret("ESTOQUE_PASSWORD", "estoque123")
 GOOGLE_DRIVE_FOLDER_ID = get_secret("GOOGLE_DRIVE_FOLDER_ID", "")
 
 LOGO_PATH = "logo.png"
@@ -56,7 +57,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- INJEÇÃO DE CSS GLOBAL PARA INTERFACE PREMIUM ---
 custom_css = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -69,7 +69,6 @@ custom_css = """
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* Top Banner / Título Principal */
     .main-header {
         background: linear-gradient(135deg, #0f172a 0%, #1e3c72 100%);
         padding: 22px 25px;
@@ -92,7 +91,6 @@ custom_css = """
         margin: 4px 0 0 0;
     }
 
-    /* Botões Globais */
     div.stButton > button:first-child {
         background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
         color: white;
@@ -111,7 +109,6 @@ custom_css = """
         color: white;
     }
 
-    /* Inputs e Caixas de Texto */
     .stTextInput input, .stNumberInput input, .stSelectbox > div > div {
         border-radius: 8px !important;
         border: 1px solid #cbd5e1 !important;
@@ -123,13 +120,11 @@ custom_css = """
         box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
     }
 
-    /* Barra Lateral (Sidebar) */
     [data-testid="stSidebar"] {
         background-color: #f8fafc;
         border-right: 1px solid #e2e8f0;
     }
 
-    /* Expanders */
     [data-testid="stExpander"] {
         border: 1px solid #e2e8f0 !important;
         border-radius: 10px !important;
@@ -148,7 +143,6 @@ custom_css = """
         padding: 0.6rem 0.8rem !important;
     }
 
-    /* Estilização das Abas (Estilo Pílula/Segmented Control) */
     [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #f1f5f9;
@@ -171,7 +165,6 @@ custom_css = """
         box-shadow: 0 2px 6px rgba(0,0,0,0.06);
     }
 
-    /* Mensagens do Chat */
     [data-testid="stChatMessage"] {
         padding: 14px 18px;
         border-radius: 14px;
@@ -180,7 +173,6 @@ custom_css = """
         box-shadow: 0 2px 5px rgba(0,0,0,0.02);
     }
     
-    /* Input do Chat */
     [data-testid="stChatInput"] {
         border-radius: 12px !important;
         border: 1px solid #cbd5e1 !important;
@@ -349,13 +341,16 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf', as
         return None
 
 # -----------------------------------------------------------------------------
-# 5. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM
+# 5. CONTROLE DE SESSÃO DO USUÁRIO E MODO ADM / ESTOQUE
 # -----------------------------------------------------------------------------
 if "usuario_identificado" not in st.session_state:
     st.session_state.usuario_identificado = False
 
 if "is_adm" not in st.session_state:
     st.session_state.is_adm = False
+
+if "is_estoque" not in st.session_state:
+    st.session_state.is_estoque = False
 
 if not st.session_state.usuario_identificado:
     st.markdown("""
@@ -366,7 +361,7 @@ if not st.session_state.usuario_identificado:
     """, unsafe_allow_html=True)
     
     st.markdown("### 👤 Identificação do Solicitante")
-    st.info("Por favor, informe seus dados para iniciar ou acesse diretamente como Administrador.")
+    st.info("Por favor, informe seus dados para iniciar ou acesse os painéis restritos abaixo.")
 
     with st.form("form_identificacao"):
         nome_user = st.text_input("Seu Nome Completo:")
@@ -387,17 +382,23 @@ if not st.session_state.usuario_identificado:
 
     st.divider()
 
-    with st.expander("🔑 Acesso Direto para Administradores (Painel ADM)", expanded=True):
+    with st.expander("🔑 Acesso Restrito (ADM / Estoque)", expanded=True):
         with st.form("form_adm_direto"):
-            senha_adm_direta = st.text_input("Senha do Administrador:", type="password")
-            btn_adm_direto = st.form_submit_button("🔓 Entrar Direto no Painel ADM")
+            senha_direta = st.text_input("Senha de Acesso:", type="password")
+            btn_direto = st.form_submit_button("🔓 Entrar")
             
-            if btn_adm_direto:
-                if senha_adm_direta == ADM_PASSWORD:
+            if btn_direto:
+                if senha_direta == ADM_PASSWORD:
                     st.session_state.is_adm = True
                     st.session_state.solicitante_str = "Administrador (ADM)"
                     st.session_state.usuario_identificado = True
                     st.success("Acesso ADM Liberado!")
+                    st.rerun()
+                elif senha_direta == ESTOQUE_PASSWORD:
+                    st.session_state.is_estoque = True
+                    st.session_state.solicitante_str = "Estoque (Recebimento)"
+                    st.session_state.usuario_identificado = True
+                    st.success("Acesso Estoque Liberado!")
                     st.rerun()
                 else:
                     st.error("Senha incorreta!")
@@ -427,17 +428,28 @@ with st.sidebar:
 
     st.divider()
 
-    st.header("🔑 Acesso ADM")
-    if not st.session_state.is_adm:
-        senha_input = st.text_input("Senha do Administrador:", type="password", key="input_adm_pass")
-        if st.button("🔓 Acessar Painel ADM"):
+    st.header("🔑 Acesso Restrito")
+    if not st.session_state.is_adm and not st.session_state.is_estoque:
+        senha_input = st.text_input("Senha (ADM / Estoque):", type="password", key="input_adm_pass")
+        if st.button("🔓 Acessar Painel"):
             if senha_input == ADM_PASSWORD:
                 st.session_state.is_adm = True
                 st.success("Acesso ADM Liberado!")
                 st.rerun()
+            elif senha_input == ESTOQUE_PASSWORD:
+                st.session_state.is_estoque = True
+                st.success("Acesso Estoque Liberado!")
+                st.rerun()
             else:
                 st.error("Senha incorreta!")
-    else:
+                
+    elif st.session_state.is_estoque:
+        st.info("🔓 **Modo Estoque Ativo**")
+        if st.button("🔒 Sair do Modo Estoque"):
+            st.session_state.is_estoque = False
+            st.rerun()
+            
+    elif st.session_state.is_adm:
         st.info("🔓 **Modo Administrador Ativo**")
         if st.button("🔒 Sair do Modo ADM"):
             st.session_state.is_adm = False
@@ -447,7 +459,7 @@ with st.sidebar:
             st.divider()
             with st.expander("🧹 Limpeza e Exportação das 3 Tabelas"):
                 st.info("Exporta compras finalizadas, desempenho de fornecedores e cotações para o Google Drive e limpa do Supabase.")
-                senha_export = st.text_input("Senha ADM:", type="password", key="senha_exp_sb")
+                senha_export = st.text_input("Confirme a Senha ADM:", type="password", key="senha_exp_sb")
                 
                 if st.button("🚀 Exportar e Limpar", key="btn_exp_sb"):
                     if senha_export == ADM_PASSWORD:
@@ -747,20 +759,62 @@ st.markdown("""
 
 if st.session_state.is_adm:
     aba_chat, aba_gestao = st.tabs(["💬 Assistente IA", "📋 Painel de Compras (ADM)"])
+    aba_estoque = None
+elif st.session_state.is_estoque:
+    aba_estoque = st.container()
+    aba_chat = None
+    aba_gestao = None
 else:
     aba_chat = st.container()
     aba_gestao = None
+    aba_estoque = None
+
+# =============================================================================
+# ABA 0: PAINEL DE ESTOQUE (RESTRITO AO ESTOQUISTA)
+# =============================================================================
+if aba_estoque:
+    with aba_estoque:
+        st.subheader("📦 Conferência de Notas Fiscais (Estoque)")
+        st.info("Aqui você visualiza todas as Notas Fiscais anexadas para conferência no momento do recebimento da mercadoria.")
+        
+        if not supabase:
+            st.warning("⚠️ O Supabase não está conectado.")
+        else:
+            query = supabase.table("solicitacoes_compras").select("*").order("id", desc=True).execute()
+            dados_nf = [item for item in query.data if item.get("link_nf")]
+            
+            if not dados_nf:
+                st.info("Nenhuma Nota Fiscal disponível no momento.")
+            else:
+                st.markdown(f"Exibindo **{len(dados_nf)}** pedido(s) com Nota Fiscal anexada:")
+                for item in dados_nf:
+                    desc = item.get("item_descricao", "Sem descrição")
+                    qtd = item.get("quantidade", 1)
+                    ref = item.get("referencia", "N/A")
+                    solic = item.get("solicitante", "N/A")
+                    link_nf = item.get("link_nf")
+                    num_pedido = item.get("numero_pedido", "N/A")
+                    status_atual = item.get("status", "Pendente")
+                    
+                    card_html = f"""<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                    <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>
+                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status atual:</b> {status_atual}</p>
+                    <a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir PDF da Nota Fiscal ↗</a>
+                    </div>"""
+                    st.markdown(card_html, unsafe_allow_html=True)
 
 # =============================================================================
 # ABA 1: CHAT DO ASSISTENTE
 # =============================================================================
-with aba_chat:
-    solicitante_atual = st.session_state.solicitante_str
-    is_fabiano = "fabiano" in normalizar_texto(solicitante_atual)
+if aba_chat:
+    with aba_chat:
+        solicitante_atual = st.session_state.solicitante_str
+        is_fabiano = "fabiano" in normalizar_texto(solicitante_atual)
 
-    regras_fabiano = ""
-    if is_fabiano:
-        regras_fabiano = """
+        regras_fabiano = ""
+        if is_fabiano:
+            regras_fabiano = """
 ⚠️ REGRA ESPECIAL PARA O USUÁRIO FABIANO:
 Como o solicitante é o Fabiano, você DEVE solicitar obrigatoriamente os seguintes campos adicionais antes de registrar a compra:
 1. ID Manutenção
@@ -773,7 +827,7 @@ Como o solicitante é o Fabiano, você DEVE solicitar obrigatoriamente os seguin
 Não finalize a solicitação com a ferramenta 'registrar_solicitacao_compra' sem antes perguntar e obter esses 6 dados adicionais do Fabiano.
 """
 
-    system_prompt = f"""
+        system_prompt = f"""
 Você é o Assistente Integrado Vital, o sistema inteligente oficial da Vital Logística.
 O operador identificado nesta sessão é: '{solicitante_atual}'.
 
@@ -795,148 +849,114 @@ Assim que possuir TODAS as informações necessárias, invoque 'registrar_solici
 Seja cortês, profissional e objetivo.
 """
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "system", "content": system_prompt}]
+        if "messages" not in st.session_state:
+            st.session_state.messages = [{"role": "system", "content": system_prompt}]
 
-    for msg in st.session_state.messages:
-        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
-        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
-        has_tools = bool(msg.get("tool_calls")) if isinstance(msg, dict) else bool(getattr(msg, "tool_calls", None))
+        for msg in st.session_state.messages:
+            role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+            content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+            has_tools = bool(msg.get("tool_calls")) if isinstance(msg, dict) else bool(getattr(msg, "tool_calls", None))
 
-        if role in ["user", "assistant"] and not has_tools and content:
-            with st.chat_message(role):
-                if isinstance(content, list):
-                    text_part = next((item["text"] for item in content if item.get("type") == "text"), "")
-                    st.markdown(text_part, unsafe_allow_html=True)
-                else:
-                    st.markdown(content, unsafe_allow_html=True)
+            if role in ["user", "assistant"] and not has_tools and content:
+                with st.chat_message(role):
+                    if isinstance(content, list):
+                        text_part = next((item["text"] for item in content if item.get("type") == "text"), "")
+                        st.markdown(text_part, unsafe_allow_html=True)
+                    else:
+                        st.markdown(content, unsafe_allow_html=True)
 
-    if prompt := st.chat_input("Digite sua mensagem, peça um frete ou anexe uma foto...", accept_file=True):
-        user_text = getattr(prompt, "text", "") if not isinstance(prompt, str) else prompt
-        user_files = getattr(prompt, "files", []) if not isinstance(prompt, str) else []
+        if prompt := st.chat_input("Digite sua mensagem, peça um frete ou anexe uma foto...", accept_file=True):
+            user_text = getattr(prompt, "text", "") if not isinstance(prompt, str) else prompt
+            user_files = getattr(prompt, "files", []) if not isinstance(prompt, str) else []
 
-        user_payload = []
-        if user_files:
-            for file in user_files:
-                bytes_data = file.read()
-                base64_image = base64.b64encode(bytes_data).decode('utf-8')
-                user_payload.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                })
-
-        user_payload.append({"type": "text", "text": user_text})
-        st.session_state.messages.append({"role": "user", "content": user_payload})
-
-        with st.spinner("Processando..."):
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=st.session_state.messages,
-                tools=tools,
-                tool_choice="auto"
-            )
-
-            response_message = response.choices[0].message
-
-            if response_message.tool_calls:
-                st.session_state.messages.append(response_message.model_dump())
-                
-                card_html_gerado = ""
-                for tool_call in response_message.tool_calls:
-                    fn_name = tool_call.function.name
-                    args = json.loads(tool_call.function.arguments)
-
-                    if fn_name == "calcular_frete_ia":
-                        resultado = calcular_frete_ia(
-                            origem=args["origem"],
-                            destino=args["destino"],
-                            tipo_trajeto=args["tipo_trajeto"],
-                            dias_por_trecho=args["dias_por_trecho"],
-                            is_viagem_curta=args["is_viagem_curta"],
-                            solicitante=solicitante_atual
-                        )
-
-                        if "sucesso" in resultado:
-                            card_html_gerado = f"""<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 25px;">
-<div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 25px 20px; border-radius: 12px; text-align: center; color: white;">
-<p style="margin:0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.9; font-weight: 600;">Valor Total Sugerido</p>
-<h1 style="margin: 8px 0 0 0; font-size: 2.8rem; font-weight: 800; letter-spacing: -0.5px;">R$ {formar_real(resultado['preco_final'])}</h1>
-</div>
-<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; text-align: center;">
-<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-<div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DISTÂNCIA</div>
-<div style="font-size: 0.95rem; font-weight: 700; color: #0f172a;">{resultado['km_total']} km</div>
-</div>
-<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-<div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DIESEL</div>
-<div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado['custo_diesel'])}</div>
-</div>
-<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-<div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">HOTEL/ALIM.</div>
-<div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado['custo_hospedagem_alim'])}</div>
-</div>
-<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-<div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">FIXOS</div>
-<div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado['gastos_fixos'])}</div>
-</div>
-</div>
-</div>"""
-
-                    elif fn_name == "registrar_solicitacao_compra":
-                        resultado = registrar_solicitacao_compra(
-                            descricao=args.get("descricao"),
-                            link=args.get("link"),
-                            referencia=args.get("referencia"),
-                            quantidade=args.get("quantidade"),
-                            motivo=args.get("motivo"),
-                            solicitante=solicitante_atual,
-                            id_manutencao=args.get("id_manutencao"),
-                            compativel=args.get("compativel"),
-                            encapsulamento=args.get("encapsulamento"),
-                            custo_estimado=args.get("custo_estimado"),
-                            link_adicional=args.get("link_adicional"),
-                            datasheet=args.get("datasheet")
-                        )
-                        if "sucesso" in resultado:
-                            link_url = args.get('link', '#')
-                            link_html = f' — <a href="{link_url}" target="_blank" style="color: #0284c7; font-weight: 600; text-decoration: underline;">Ver Produto 🔗</a>' if link_url and link_url != '#' else ''
-                            
-                            extra_info = ""
-                            if args.get("id_manutencao"):
-                                extra_info += f"<div><b>🛠️ ID Manutenção:</b> {args.get('id_manutencao')} | <b>🧩 Compatível:</b> {args.get('compativel', 'N/A')}</div>"
-                                extra_info += f"<div><b>📦 Encapsulamento:</b> {args.get('encapsulamento', 'N/A')} | <b>💰 Custo Est.:</b> {args.get('custo_estimado', 'N/A')}</div>"
-
-                            card_html_gerado = f"""<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
-<h4 style="margin: 0 0 12px 0; color: #166534; font-size: 1.1rem;">🛒 Compra Registrada com Sucesso!</h4>
-<div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; color: #14532d;">
-<div><b>👤 Solicitante:</b> {solicitante_atual}</div>
-<div><b>📦 Nome do item:</b> {args.get('descricao')}</div>
-<div><b>🔢 Quantidade:</b> {args.get('quantidade')} un.</div>
-<div><b>📋 Detalhe:</b> {args.get('referencia')}{link_html}</div>
-<div><b>🎯 Motivo:</b> {args.get('motivo')}</div>
-{extra_info}
-</div>
-</div>"""
-
-                    st.session_state.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(resultado)
+            user_payload = []
+            if user_files:
+                for file in user_files:
+                    bytes_data = file.read()
+                    base64_image = base64.b64encode(bytes_data).decode('utf-8')
+                    user_payload.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                     })
 
-                final_response = client.chat.completions.create(
+            user_payload.append({"type": "text", "text": user_text})
+            st.session_state.messages.append({"role": "user", "content": user_payload})
+
+            with st.spinner("Processando..."):
+                response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=st.session_state.messages
+                    messages=st.session_state.messages,
+                    tools=tools,
+                    tool_choice="auto"
                 )
 
-                texto_final = final_response.choices[0].message.content
-                conteudo_completo = f"{card_html_gerado}\n\n{texto_final}" if card_html_gerado else texto_final
-                st.session_state.messages.append({"role": "assistant", "content": conteudo_completo})
+                response_message = response.choices[0].message
 
-            else:
-                st.session_state.messages.append({"role": "assistant", "content": response_message.content})
+                if response_message.tool_calls:
+                    st.session_state.messages.append(response_message.model_dump())
+                    
+                    card_html_gerado = ""
+                    for tool_call in response_message.tool_calls:
+                        fn_name = tool_call.function.name
+                        args = json.loads(tool_call.function.arguments)
 
-        st.rerun()
+                        if fn_name == "calcular_frete_ia":
+                            resultado = calcular_frete_ia(
+                                origem=args["origem"],
+                                destino=args["destino"],
+                                tipo_trajeto=args["tipo_trajeto"],
+                                dias_por_trecho=args["dias_por_trecho"],
+                                is_viagem_curta=args["is_viagem_curta"],
+                                solicitante=solicitante_atual
+                            )
+
+                            if "sucesso" in resultado:
+                                card_html_gerado = f'<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 25px;"><div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 25px 20px; border-radius: 12px; text-align: center; color: white;"><p style="margin:0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.9; font-weight: 600;">Valor Total Sugerido</p><h1 style="margin: 8px 0 0 0; font-size: 2.8rem; font-weight: 800; letter-spacing: -0.5px;">R$ {formar_real(resultado["preco_final"])}</h1></div><div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; text-align: center;"><div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DISTÂNCIA</div><div style="font-size: 0.95rem; font-weight: 700; color: #0f172a;">{resultado["km_total"]} km</div></div><div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DIESEL</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_diesel"])}</div></div><div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">HOTEL/ALIM.</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_hospedagem_alim"])}</div></div><div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">FIXOS</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["gastos_fixos"])}</div></div></div></div>'
+
+                        elif fn_name == "registrar_solicitacao_compra":
+                            resultado = registrar_solicitacao_compra(
+                                descricao=args.get("descricao"),
+                                link=args.get("link"),
+                                referencia=args.get("referencia"),
+                                quantidade=args.get("quantidade"),
+                                motivo=args.get("motivo"),
+                                solicitante=solicitante_atual,
+                                id_manutencao=args.get("id_manutencao"),
+                                compativel=args.get("compativel"),
+                                encapsulamento=args.get("encapsulamento"),
+                                custo_estimado=args.get("custo_estimado"),
+                                link_adicional=args.get("link_adicional"),
+                                datasheet=args.get("datasheet")
+                            )
+                            if "sucesso" in resultado:
+                                link_url = args.get('link', '#')
+                                link_html = f' — <a href="{link_url}" target="_blank" style="color: #0284c7; font-weight: 600; text-decoration: underline;">Ver Produto 🔗</a>' if link_url and link_url != '#' else ''
+                                
+                                extra_info = ""
+                                if args.get("id_manutencao"):
+                                    extra_info = f'<div><b>🛠️ ID Manutenção:</b> {args.get("id_manutencao")} | <b>🧩 Compatível:</b> {args.get("compativel", "N/A")}</div><div><b>📦 Encapsulamento:</b> {args.get("encapsulamento", "N/A")} | <b>💰 Custo Est.:</b> {args.get("custo_estimado", "N/A")}</div>'
+
+                                card_html_gerado = f'<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px;"><h4 style="margin: 0 0 12px 0; color: #166534; font-size: 1.1rem;">🛒 Compra Registrada com Sucesso!</h4><div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; color: #14532d;"><div><b>👤 Solicitante:</b> {solicitante_atual}</div><div><b>📦 Nome do item:</b> {args.get("descricao")}</div><div><b>🔢 Quantidade:</b> {args.get("quantidade")} un.</div><div><b>📋 Detalhe:</b> {args.get("referencia")}{link_html}</div><div><b>🎯 Motivo:</b> {args.get("motivo")}</div>{extra_info}</div></div>'
+
+                        st.session_state.messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(resultado)
+                        })
+
+                    final_response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=st.session_state.messages
+                    )
+
+                    texto_final = final_response.choices[0].message.content
+                    conteudo_completo = f"{card_html_gerado}\n\n{texto_final}" if card_html_gerado else texto_final
+                    st.session_state.messages.append({"role": "assistant", "content": conteudo_completo})
+
+                else:
+                    st.session_state.messages.append({"role": "assistant", "content": response_message.content})
+
+            st.rerun()
 
 # =============================================================================
 # ABA 2: PAINEL DE GESTÃO DE COMPRAS (RESTRITO AO MODO ADM)
@@ -946,7 +966,6 @@ if aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
         if supabase:
-            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES ---
             try:
                 res_kpi = supabase.table("desempenho_fornecedores").select("*").execute().data
                 if res_kpi:
@@ -964,7 +983,6 @@ if aba_gestao:
                     col_kpi2.metric("🎯 OTIF / Qualidade", f"{otif_pct:.1f}%")
                     col_kpi3.metric("💳 Prazo Médio Pagto", f"{pmp_medio:.0f} dias")
                     
-                    # --- BOTÃO: ANÁLISE IA QUINZENAL ---
                     if st.button("🧠 Gerar Relatório de Desempenho Quinzenal (IA)"):
                         with st.spinner("A IA está analisando os dados dos últimos 15 dias..."):
                             hoje = datetime.datetime.now(datetime.timezone.utc)
@@ -1023,7 +1041,6 @@ if aba_gestao:
             except Exception:
                 pass
 
-            # --- FORMULÁRIO DE CADASTRO MANUAL ---
             with st.expander("➕ Cadastrar Novo Pedido Manualmente (ADM)"):
                 with st.form("form_novo_pedido_adm"):
                     st.markdown("#### 📦 Dados Principais")
@@ -1134,18 +1151,7 @@ if aba_gestao:
                     if id_manut or compat or encaps or custo_est:
                         campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
-                    card_html = f"""<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
-<div style="display: flex; justify-content: space-between; align-items: center;">
-<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>
-<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>
-</div>
-<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>
-<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
-<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>
-{campos_extra_adm}
-<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>
-<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>
-</div>"""
+                    card_html = f'<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;"><div style="display: flex; justify-content: space-between; align-items: center;"><h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4><span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span></div><p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p><p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p><p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>{campos_extra_adm}<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p><p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p></div>'
 
                     with st.container():
                         st.markdown(card_html, unsafe_allow_html=True)
@@ -1181,7 +1187,6 @@ if aba_gestao:
                                             st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                             st.rerun()
 
-                        # --- EXPANDER PARA DADOS DE DESEMPENHO ---
                         with st.expander("🏁 Registrar Dados de Entrega / Finalizar"):
                             with st.form(f"form_fin_{item_id}"):
                                 c_fin1, c_fin2 = st.columns(2)
@@ -1209,13 +1214,11 @@ if aba_gestao:
                                         otif = no_prazo and (f_qualidade == "SIM")
                                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-                                        # 1. Atualiza o status do pedido
                                         supabase.table("solicitacoes_compras").update({
                                             "status": "Finalizado",
                                             "data_finalizacao": now_iso
                                         }).eq("id", item_id).execute()
 
-                                        # 2. Insere na tabela de desempenho
                                         supabase.table("desempenho_fornecedores").insert({
                                             "pedido_id": item_id,
                                             "fornecedor": f_fornec,
@@ -1230,7 +1233,6 @@ if aba_gestao:
                                         st.success("🏁 Pedido finalizado e métricas cadastradas na nova tabela!")
                                         st.rerun()
 
-                        # BOTÕES DE AÇÃO RÁPIDA
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             if st.button("🚚 Aguardando entrega", key=f"entreg_{item_id}"):
