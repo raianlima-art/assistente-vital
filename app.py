@@ -18,6 +18,7 @@ from googleapiclient.http import MediaIoBaseUpload
 from openai import OpenAI
 from supabase import Client, create_client
 
+
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
