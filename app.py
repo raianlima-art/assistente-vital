@@ -292,22 +292,23 @@ with st.sidebar:
             st.session_state.is_adm = False
             st.rerun()
 
+        # --- LIMPEZA E EXPORTAÇÃO NO SIDEBAR ---
         if supabase:
             st.divider()
-            with st.expander("🧹 Limpeza e Exportação das Tabelas"):
-                st.info("Exporta compras finalizadas (com NF) e cotações para o Google Drive e limpa do Supabase.")
+            with st.expander("🧹 Limpeza e Exportação das 3 Tabelas"):
+                st.info("Exporta compras finalizadas, desempenho de fornecedores e cotações para o Google Drive e limpa do Supabase.")
                 senha_export = st.text_input("Senha ADM:", type="password", key="senha_exp_sb")
                 
                 if st.button("🚀 Exportar e Limpar", key="btn_exp_sb"):
                     if senha_export == ADM_PASSWORD:
-                        with st.spinner("Processando exportação..."):
+                        with st.spinner("Processando exportação de 3 tabelas..."):
                             try:
                                 data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
                                 links_gerados = []
 
+                                # 1. EXPORTAR COMPRAS
                                 resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
                                 dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
-
                                 if dados_compras:
                                     output_c = io.StringIO()
                                     output_c.write('\ufeff')
@@ -316,20 +317,32 @@ with st.sidebar:
                                     writer_c = csv.DictWriter(output_c, fieldnames=list(chaves_c), delimiter=';')
                                     writer_c.writeheader()
                                     writer_c.writerows(dados_compras)
-
-                                    link_c = salvar_nf_no_drive(
-                                        output_c.getvalue().encode('utf-8'),
-                                        f"Relatorio_Compras_{data_atual}.csv",
-                                        mime_type='text/csv'
-                                    )
+                                    link_c = salvar_nf_no_drive(output_c.getvalue().encode('utf-8'), f"Relatorio_Compras_{data_atual}.csv", mime_type='text/csv')
                                     if link_c:
                                         for item in dados_compras:
                                             supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
                                         links_gerados.append(("Compras", link_c, len(dados_compras)))
 
+                                # 2. EXPORTAR DESEMPENHO FORNECEDORES
+                                resp_desemp = supabase.table("desempenho_fornecedores").select("*").execute()
+                                dados_desemp = resp_desemp.data
+                                if dados_desemp:
+                                    output_d = io.StringIO()
+                                    output_d.write('\ufeff')
+                                    chaves_d = set()
+                                    for d in dados_desemp: chaves_d.update(d.keys())
+                                    writer_d = csv.DictWriter(output_d, fieldnames=list(chaves_d), delimiter=';')
+                                    writer_d.writeheader()
+                                    writer_d.writerows(dados_desemp)
+                                    link_d = salvar_nf_no_drive(output_d.getvalue().encode('utf-8'), f"Relatorio_Desempenho_Fornecedores_{data_atual}.csv", mime_type='text/csv')
+                                    if link_d:
+                                        for item in dados_desemp:
+                                            supabase.table("desempenho_fornecedores").delete().eq("id", item["id"]).execute()
+                                        links_gerados.append(("Fornecedores", link_d, len(dados_desemp)))
+
+                                # 3. EXPORTAR COTAÇÕES
                                 resp_cot = supabase.table("cotacoes").select("*").execute()
                                 dados_cot = resp_cot.data
-
                                 if dados_cot:
                                     output_cot = io.StringIO()
                                     output_cot.write('\ufeff')
@@ -338,12 +351,7 @@ with st.sidebar:
                                     writer_cot = csv.DictWriter(output_cot, fieldnames=list(chaves_cot), delimiter=';')
                                     writer_cot.writeheader()
                                     writer_cot.writerows(dados_cot)
-
-                                    link_cot = salvar_nf_no_drive(
-                                        output_cot.getvalue().encode('utf-8'),
-                                        f"Relatorio_Cotacoes_{data_atual}.csv",
-                                        mime_type='text/csv'
-                                    )
+                                    link_cot = salvar_nf_no_drive(output_cot.getvalue().encode('utf-8'), f"Relatorio_Cotacoes_{data_atual}.csv", mime_type='text/csv')
                                     if link_cot:
                                         for item in dados_cot:
                                             supabase.table("cotacoes").delete().eq("id", item["id"]).execute()
@@ -355,7 +363,6 @@ with st.sidebar:
                                     st.success("✅ Concluído!")
                                     for titulo, link_d, qtd in links_gerados:
                                         st.markdown(f"📊 **{titulo}:** {qtd} item(ns) — [Abrir Drive]({link_d})")
-
                             except Exception as e:
                                 st.error(f"❌ Erro: {e}")
                     else:
@@ -787,9 +794,9 @@ if aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
         if supabase:
-            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES ---
+            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES (NOVA TABELA) ---
             try:
-                res_kpi = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute().data
+                res_kpi = supabase.table("desempenho_fornecedores").select("*").execute().data
                 if res_kpi:
                     lead_times = [k.get("lead_time_dias") for k in res_kpi if k.get("lead_time_dias") is not None]
                     lt_medio = sum(lead_times) / len(lead_times) if lead_times else 0.0
@@ -898,7 +905,6 @@ if aba_gestao:
                     encaps = item.get("encapsulamento")
                     custo_est = item.get("custo_estimado")
                     num_pedido = item.get("numero_pedido")
-                    fornecedor = item.get("fornecedor_vencedor")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
@@ -915,8 +921,8 @@ if aba_gestao:
                     rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
                     campos_extra_adm = ""
-                    if num_pedido or fornecedor:
-                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"}</p>'
+                    if num_pedido:
+                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido}</p>'
                     if id_manut or compat or encaps or custo_est:
                         campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
@@ -967,12 +973,12 @@ if aba_gestao:
                                             st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                             st.rerun()
 
-                        # --- EXPANDER PARA DADOS DE DESEMPENHO AO FINALIZAR ---
+                        # --- EXPANDER PARA DADOS DE DESEMPENHO (SALVA NA NOVA TABELA) ---
                         with st.expander("🏁 Registrar Dados de Entrega / Finalizar"):
                             with st.form(f"form_fin_{item_id}"):
                                 c_fin1, c_fin2 = st.columns(2)
                                 with c_fin1:
-                                    f_fornec = st.text_input("Fornecedor Vencedor:", value=fornecedor or "")
+                                    f_fornec = st.text_input("Fornecedor Vencedor:")
                                     f_dt_prometida = st.date_input("Data Prometida de Entrega:", value=datetime.date.today())
                                     f_qualidade = st.selectbox("Qualidade OK (Sem defeitos)?", ["SIM", "NÃO"])
                                 with c_fin2:
@@ -995,19 +1001,25 @@ if aba_gestao:
                                         otif = no_prazo and (f_qualidade == "SIM")
                                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+                                        # 1. Atualiza o status do pedido
                                         supabase.table("solicitacoes_compras").update({
                                             "status": "Finalizado",
-                                            "data_finalizacao": now_iso,
-                                            "fornecedor_vencedor": f_fornec,
+                                            "data_finalizacao": now_iso
+                                        }).eq("id", item_id).execute()
+
+                                        # 2. Insere na NOVA TABELA de desempenho
+                                        supabase.table("desempenho_fornecedores").insert({
+                                            "pedido_id": item_id,
+                                            "fornecedor": f_fornec,
                                             "data_prometida": f_dt_prometida.isoformat(),
                                             "data_entregue": f_dt_entregue.isoformat(),
                                             "qualidade_ok": f_qualidade,
                                             "prazo_pagamento_dias": f_paz_pg,
                                             "lead_time_dias": lead_time,
                                             "otif_ok": otif
-                                        }).eq("id", item_id).execute()
+                                        }).execute()
 
-                                        st.success("🏁 Pedido finalizado e métricas calculadas!")
+                                        st.success("🏁 Pedido finalizado e métricas cadastradas na nova tabela!")
                                         st.rerun()
 
                         # BOTÕES DE AÇÃO RÁPIDA
