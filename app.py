@@ -1206,17 +1206,13 @@ if aba_chat:
         regras_fabiano = ""
         if is_fabiano:
             regras_fabiano = """
-⚠️ REGRA ESPECIAL PARA O USUÁRIO FABIANO:
-Como o solicitante é o Fabiano, você DEVE solicitar obrigatoriamente os seguintes campos adicionais antes de registrar a compra:
-1. ID Manutenção
-2. Compatível (com qual equipamento/máquina)
-3. Encapsulamento
-4. Custo estimado (R$)
-5. Link adicional
-6. Datasheet (link ou arquivo/PDF)
+            REGRA PARA O USUARIO FABIANO:
+            Apos receber as informacoes basicas do produto, pergunte uma unica vez:
+            "Deseja adicionar alguma informacao tecnica opcional (ID Manutencao, Compatibilidade, Encapsulamento, Custo Estimado, Link Adicional ou Datasheet)?"
 
-Não finalize a solicitação com a ferramenta 'registrar_solicitacao_compra' sem antes perguntar e obter esses 6 dados adicionais do Fabiano.
-"""
+            - Se ele fornecer os dados, inclua-os na chamada da ferramenta.
+            - Se ele disser "nao", "nao precisa", "pode registrar" ou mandar outro item, chame 'registrar_solicitacao_compra' imediatamente.
+            """
 
         system_prompt = f"""
 Você é o Assistente Integrado Vital, o sistema inteligente oficial da Vital C.
@@ -1236,7 +1232,7 @@ Suas atribuições principais são:
 
 {regras_fabiano}
 
-Assim que possuir TODAS as informações necessárias, invoque 'registrar_solicitacao_compra'.
+Assim que possuir as informações básicas necessárias, invoque 'registrar_solicitacao_compra'.
 Seja cortês, profissional e objetivo.
 """
 
