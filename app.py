@@ -75,7 +75,7 @@ custom_css = """
         border-radius: 16px;
         color: white;
         text-align: center;
-        margin-bottom: 25px;
+        margin-bottom: 15px;
         box-shadow: 0 4px 15px rgba(0,0,0,0.08);
     }
     .main-header h1 {
@@ -422,7 +422,7 @@ margem = 20
 
 with st.sidebar:
     st.success(f"👤 **Logado como:**\n\n{st.session_state.solicitante_str}")
-    if st.button("🚪 Trocar Usuário / Sair"):
+    if st.button("🚪 Trocar Usuário / Sair", key="btn_sb_logout"):
         st.session_state.clear()
         st.rerun()
 
@@ -445,14 +445,14 @@ with st.sidebar:
                 
     elif st.session_state.is_estoque:
         st.info("🔓 **Modo Estoque Ativo**")
-        if st.button("🔒 Sair do Modo Estoque"):
-            st.session_state.is_estoque = False
+        if st.button("🔄 Alternar Perfil / Sair do Estoque", key="btn_sb_sair_est"):
+            st.session_state.clear()
             st.rerun()
             
     elif st.session_state.is_adm:
         st.info("🔓 **Modo Administrador Ativo**")
-        if st.button("🔒 Sair do Modo ADM"):
-            st.session_state.is_adm = False
+        if st.button("🔄 Alternar Perfil / Sair do ADM", key="btn_sb_sair_adm"):
+            st.session_state.clear()
             st.rerun()
 
         if supabase:
@@ -748,7 +748,7 @@ tools = [
 ]
 
 # -----------------------------------------------------------------------------
-# 10. INTERFACE PRINCIPAL E ABAS
+# 10. INTERFACE PRINCIPAL E BANNER DE BARRA DE TOPO
 # -----------------------------------------------------------------------------
 st.markdown("""
     <div class="main-header">
@@ -756,6 +756,17 @@ st.markdown("""
         <p>Central de Operações, Cotações e Gestão de Compras</p>
     </div>
 """, unsafe_allow_html=True)
+
+# BARRA FIXA DE CONTROLE DE PERFIL NO TOPO DA TELA
+col_status1, col_status2 = st.columns([3, 1])
+with col_status1:
+    st.markdown(f"👤 **Perfil Ativo:** `{st.session_state.solicitante_str}`")
+with col_status2:
+    if st.button("🔄 Alternar Perfil", key="btn_top_switch"):
+        st.session_state.clear()
+        st.rerun()
+
+st.divider()
 
 if st.session_state.is_adm:
     aba_chat, aba_gestao = st.tabs(["💬 Assistente IA", "📋 Painel de Compras (ADM)"])
@@ -1218,7 +1229,6 @@ if aba_gestao:
                             st.success("📄 **Nota Fiscal Anexada!**")
                             st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
                         
-                        # Bloco de edição dos dados da compra (Anexo de PDF agora é Opcional)
                         if status_atual in ["Aguardando NF", "Aguardando entrega"]:
                             with st.expander("📝 Cadastrar / Atualizar Dados da Compra e NF"):
                                 with st.form(f"form_upload_nf_{item_id}"):
