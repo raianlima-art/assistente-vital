@@ -757,7 +757,6 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# BARRA FIXA DE CONTROLE DE PERFIL NO TOPO DA TELA
 col_status1, col_status2 = st.columns([3, 1])
 with col_status1:
     st.markdown(f"👤 **Perfil Ativo:** `{st.session_state.solicitante_str}`")
@@ -842,8 +841,10 @@ if aba_estoque:
 
                                 try:
                                     dt_prom_obj = datetime.datetime.strptime(str(dt_prometida), "%Y-%m-%d").date()
+                                    dt_prom_salvar = dt_prom_obj.isoformat()
                                 except Exception:
                                     dt_prom_obj = f_dt_entregue
+                                    dt_prom_salvar = f_dt_entregue.isoformat()
 
                                 lead_time = (f_dt_entregue - dt_inicio).days
                                 no_prazo = f_dt_entregue <= dt_prom_obj
@@ -858,7 +859,7 @@ if aba_estoque:
                                 supabase.table("desempenho_fornecedores").insert({
                                     "pedido_id": item_id,
                                     "fornecedor": fornecedor,
-                                    "data_prometida": str(dt_prometida),
+                                    "data_prometida": dt_prom_salvar,
                                     "data_entregue": f_dt_entregue.isoformat(),
                                     "qualidade_ok": f_qualidade,
                                     "prazo_pagamento_dias": prazo_pg,
