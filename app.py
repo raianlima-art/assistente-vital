@@ -1134,13 +1134,15 @@ if aba_estoque:
                     if not botoes_docs:
                         botoes_docs = '<span style="color: #64748b; font-size: 0.85rem; font-weight: 500;">⏳ Documentos pendentes pelo ADM</span>'
 
-                    card_html = f"""<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                    <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>
-                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>
-                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>
-                    {botoes_docs}
-                    </div>"""
+                    card_html = (
+                        f'<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">'
+                        f'<h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>'
+                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>'
+                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>'
+                        f'<p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>'
+                        f'{botoes_docs}'
+                        f'</div>'
+                    )
 
                     st.markdown(card_html, unsafe_allow_html=True)
 
@@ -1301,32 +1303,19 @@ Seja cortês, profissional e objetivo.
                             )
 
                             if "sucesso" in resultado:
-                                card_html_gerado = f"""
-                                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 25px;">
-                                    <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 25px 20px; border-radius: 12px; text-align: center; color: white;">
-                                        <p style="margin:0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.9; font-weight: 600;">Valor Total Sugerido</p>
-                                        <h1 style="margin: 8px 0 0 0; font-size: 2.8rem; font-weight: 800; letter-spacing: -0.5px;">R$ {formar_real(resultado["preco_final"])}</h1>
-                                    </div>
-                                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; text-align: center;">
-                                        <div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-                                            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DISTÂNCIA</div>
-                                            <div style="font-size: 0.95rem; font-weight: 700; color: #0f172a;">{resultado["km_total"]} km</div>
-                                        </div>
-                                        <div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-                                            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DIESEL</div>
-                                            <div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_diesel"])}</div>
-                                        </div>
-                                        <div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-                                            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">HOTEL/ALIM.</div>
-                                            <div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_hospedagem_alim"])}</div>
-                                        </div>
-                                        <div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;">
-                                            <div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">FIXOS</div>
-                                            <div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["gastos_fixos"])}</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                """
+                                card_html_gerado = (
+                                    f'<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); margin-bottom: 25px;">'
+                                    f'<div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 25px 20px; border-radius: 12px; text-align: center; color: white;">'
+                                    f'<p style="margin:0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.9; font-weight: 600;">Valor Total Sugerido</p>'
+                                    f'<h1 style="margin: 8px 0 0 0; font-size: 2.8rem; font-weight: 800; letter-spacing: -0.5px;">R$ {formar_real(resultado["preco_final"])}</h1>'
+                                    f'</div>'
+                                    f'<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px; text-align: center;">'
+                                    f'<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DISTÂNCIA</div><div style="font-size: 0.95rem; font-weight: 700; color: #0f172a;">{resultado["km_total"]} km</div></div>'
+                                    f'<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">DIESEL</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_diesel"])}</div></div>'
+                                    f'<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">HOTEL/ALIM.</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["custo_hospedagem_alim"])}</div></div>'
+                                    f'<div style="background: #f8fafc; padding: 12px 6px; border-radius: 8px; border: 1px solid #f1f5f9;"><div style="font-size: 0.7rem; color: #64748b; font-weight: 700; margin-bottom: 4px;">FIXOS</div><div style="font-size: 0.9rem; font-weight: 700; color: #0f172a; white-space: nowrap;">R$ {formar_real(resultado["gastos_fixos"])}</div></div>'
+                                    f'</div></div>'
+                                )
 
                         elif fn_name == "registrar_solicitacao_compra":
                             resultado = registrar_solicitacao_compra(
@@ -1358,19 +1347,18 @@ Seja cortês, profissional e objetivo.
                                         f'<div><b>📦 Encapsulamento:</b> {args.get("encapsulamento", "N/A")} | <b>💰 Custo Est.:</b> {args.get("custo_estimado", "N/A")}</div>'
                                     )
 
-                                card_html_gerado = f"""
-                                <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px;">
-                                    <h4 style="margin: 0 0 12px 0; color: #166534; font-size: 1.1rem;">🛒 Compra Registrada com Sucesso!</h4>
-                                    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; color: #14532d;">
-                                        <div><b>👤 Solicitante:</b> {solicitante_atual}</div>
-                                        <div><b>📦 Nome do item:</b> {args.get("descricao")}</div>
-                                        <div><b>🔢 Quantidade:</b> {args.get("quantidade")} un.</div>
-                                        <div><b>📋 Detalhe:</b> {args.get("referencia")}{link_html}</div>
-                                        <div><b>🎯 Motivo:</b> {args.get("motivo")}</div>
-                                        {extra_info}
-                                    </div>
-                                </div>
-                                """
+                                card_html_gerado = (
+                                    f'<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 18px; margin-bottom: 20px;">'
+                                    f'<h4 style="margin: 0 0 12px 0; color: #166534; font-size: 1.1rem;">🛒 Compra Registrada com Sucesso!</h4>'
+                                    f'<div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.95rem; color: #14532d;">'
+                                    f'<div><b>👤 Solicitante:</b> {solicitante_atual}</div>'
+                                    f'<div><b>📦 Nome do item:</b> {args.get("descricao")}</div>'
+                                    f'<div><b>🔢 Quantidade:</b> {args.get("quantidade")} un.</div>'
+                                    f'<div><b>📋 Detalhe:</b> {args.get("referencia")}{link_html}</div>'
+                                    f'<div><b>🎯 Motivo:</b> {args.get("motivo")}</div>'
+                                    f'{extra_info}'
+                                    f'</div></div>'
+                                )
 
                         st.session_state.messages.append({
                             "role": "tool",
@@ -1592,20 +1580,20 @@ if aba_gestao:
                     if id_manut or compat or encaps or custo_est:
                         campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
-                    card_html = f"""
-                    <div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>
-                            <span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>
-                        </div>
-                        <p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>
-                        <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
-                        <p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>
-                        {campos_extra_adm}
-                        <p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>
-                        <p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>
-                    </div>
-                    """
+                    card_html = (
+                        f'<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">'
+                        f'<div style="display: flex; justify-content: space-between; align-items: center;">'
+                        f'<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>'
+                        f'<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>'
+                        f'</div>'
+                        f'<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>'
+                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>'
+                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>'
+                        f'{campos_extra_adm}'
+                        f'<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>'
+                        f'<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>'
+                        f'</div>'
+                    )
 
                     with st.container():
                         st.markdown(card_html, unsafe_allow_html=True)
@@ -1778,7 +1766,12 @@ if aba_gestao:
                                                 with st.spinner("Enviando Nota Fiscal para o Google Drive..."):
                                                     bytes_data = uploaded_nf.read()
                                                     nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                    link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo, nome_subpasta=["Relatórios IA", "Notas Fiscais"])
+                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                    link_drive = salvar_nf_no_drive(
+                                                        bytes_data,
+                                                        nome_arquivo,
+                                                        nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano],
+                                                    )
                                                     if link_drive:
                                                         update_payload["link_nf"] = link_drive
 
