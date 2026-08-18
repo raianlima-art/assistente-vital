@@ -56,7 +56,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- INJEÇÃO DE CSS GLOBAL PARA UM VISUAL MODERNO ---
+# --- INJEÇÃO DE CSS GLOBAL PARA INTERFACE PREMIUM ---
 custom_css = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -69,6 +69,29 @@ custom_css = """
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
+    /* Top Banner / Título Principal */
+    .main-header {
+        background: linear-gradient(135deg, #0f172a 0%, #1e3c72 100%);
+        padding: 22px 25px;
+        border-radius: 16px;
+        color: white;
+        text-align: center;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+    }
+    .main-header h1 {
+        color: #ffffff !important;
+        font-size: 1.8rem !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+        letter-spacing: -0.5px;
+    }
+    .main-header p {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        margin: 4px 0 0 0;
+    }
+
     /* Botões Globais */
     div.stButton > button:first-child {
         background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
@@ -78,11 +101,10 @@ custom_css = """
         padding: 0.6rem 1.2rem;
         font-weight: 600;
         letter-spacing: 0.5px;
-        transition: all 0.3s ease;
+        transition: all 0.25s ease;
         box-shadow: 0 4px 6px rgba(0,0,0,0.08);
         width: 100%;
     }
-    
     div.stButton > button:first-child:hover {
         transform: translateY(-2px);
         box-shadow: 0 6px 12px rgba(42, 82, 152, 0.25);
@@ -96,7 +118,6 @@ custom_css = """
         background-color: #ffffff !important;
         transition: all 0.2s ease-in-out;
     }
-    
     .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox > div > div:focus-within {
         border-color: #2a5298 !important;
         box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
@@ -108,21 +129,18 @@ custom_css = """
         border-right: 1px solid #e2e8f0;
     }
 
-    /* Estilização Avançada dos Expanders (Configurações Fixas) */
+    /* Expanders */
     [data-testid="stExpander"] {
         border: 1px solid #e2e8f0 !important;
         border-radius: 10px !important;
         background-color: #ffffff !important;
         margin-bottom: 12px !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
-        transition: all 0.2s ease;
     }
-
     [data-testid="stExpander"]:hover {
         border-color: #cbd5e1 !important;
         box-shadow: 0 4px 8px rgba(0,0,0,0.05) !important;
     }
-
     .streamlit-expanderHeader {
         font-weight: 600 !important;
         color: #1e293b !important;
@@ -130,26 +148,48 @@ custom_css = """
         padding: 0.6rem 0.8rem !important;
     }
 
-    /* Abas (Tabs) */
+    /* Estilização das Abas (Estilo Pílula/Segmented Control) */
     [data-baseweb="tab-list"] {
-        gap: 20px;
+        gap: 8px;
+        background-color: #f1f5f9;
+        padding: 6px;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 20px;
     }
     [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 8px 18px;
         font-weight: 600;
-        padding: 10px 0;
+        color: #64748b;
+        background: transparent;
+        border: none !important;
     }
     [data-baseweb="tab"][aria-selected="true"] {
-        color: #2a5298;
+        background-color: #ffffff !important;
+        color: #1e3c72 !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
     }
 
-    /* Chat Messages */
-    .stChatMessage {
-        background-color: #ffffff;
+    /* Mensagens do Chat */
+    [data-testid="stChatMessage"] {
+        padding: 14px 18px;
+        border-radius: 14px;
+        margin-bottom: 12px;
         border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 15px;
         box-shadow: 0 2px 5px rgba(0,0,0,0.02);
-        margin-bottom: 15px;
+    }
+    
+    /* Input do Chat */
+    [data-testid="stChatInput"] {
+        border-radius: 12px !important;
+        border: 1px solid #cbd5e1 !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+        background-color: #ffffff !important;
+    }
+    [data-testid="stChatInput"]:focus-within {
+        border-color: #2a5298 !important;
+        box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
     }
 </style>
 """
@@ -318,7 +358,13 @@ if "is_adm" not in st.session_state:
     st.session_state.is_adm = False
 
 if not st.session_state.usuario_identificado:
-    st.title("🤖 Assistente Integrado Vital")
+    st.markdown("""
+        <div class="main-header">
+            <h1>🤖 Assistente Integrado Vital</h1>
+            <p>Plataforma Inteligente de Compras & Logística</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("### 👤 Identificação do Solicitante")
     st.info("Por favor, informe seus dados para iniciar ou acesse diretamente como Administrador.")
 
@@ -410,7 +456,6 @@ with st.sidebar:
                                 data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
                                 links_gerados = []
 
-                                # 1. EXPORTAR COMPRAS
                                 resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
                                 dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
                                 if dados_compras:
@@ -427,7 +472,6 @@ with st.sidebar:
                                             supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
                                         links_gerados.append(("Compras", link_c, len(dados_compras)))
 
-                                # 2. EXPORTAR DESEMPENHO FORNECEDORES
                                 resp_desemp = supabase.table("desempenho_fornecedores").select("*").execute()
                                 dados_desemp = resp_desemp.data
                                 if dados_desemp:
@@ -444,7 +488,6 @@ with st.sidebar:
                                             supabase.table("desempenho_fornecedores").delete().eq("id", item["id"]).execute()
                                         links_gerados.append(("Fornecedores", link_d, len(dados_desemp)))
 
-                                # 3. EXPORTAR COTAÇÕES
                                 resp_cot = supabase.table("cotacoes").select("*").execute()
                                 dados_cot = resp_cot.data
                                 if dados_cot:
@@ -695,7 +738,12 @@ tools = [
 # -----------------------------------------------------------------------------
 # 10. INTERFACE PRINCIPAL E ABAS
 # -----------------------------------------------------------------------------
-st.title("🤖 Assistente Integrado Vital")
+st.markdown("""
+    <div class="main-header">
+        <h1>🤖 Assistente Integrado Vital</h1>
+        <p>Central de Operações, Cotações e Gestão de Compras</p>
+    </div>
+""", unsafe_allow_html=True)
 
 if st.session_state.is_adm:
     aba_chat, aba_gestao = st.tabs(["💬 Assistente IA", "📋 Painel de Compras (ADM)"])
@@ -898,7 +946,7 @@ if aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
         
         if supabase:
-            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES (NOVA TABELA) ---
+            # --- DASHBOARD DE KPIS DE DESEMPENHO E FORNECEDORES ---
             try:
                 res_kpi = supabase.table("desempenho_fornecedores").select("*").execute().data
                 if res_kpi:
@@ -958,7 +1006,6 @@ if aba_gestao:
                                 data_str = datetime.datetime.now().strftime("%d-%m-%Y")
                                 nome_arq = f"Relatorio_Inteligente_Fornecedores_{data_str}"
                                 
-                                # Salva o documento no Drive especificando a subpasta "Relatórios IA"
                                 link_relatorio = salvar_nf_no_drive(
                                     relatorio_texto.encode('utf-8'), 
                                     nome_arq, 
@@ -1134,7 +1181,7 @@ if aba_gestao:
                                             st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
                                             st.rerun()
 
-                        # --- EXPANDER PARA DADOS DE DESEMPENHO (SALVA NA NOVA TABELA) ---
+                        # --- EXPANDER PARA DADOS DE DESEMPENHO ---
                         with st.expander("🏁 Registrar Dados de Entrega / Finalizar"):
                             with st.form(f"form_fin_{item_id}"):
                                 c_fin1, c_fin2 = st.columns(2)
@@ -1168,7 +1215,7 @@ if aba_gestao:
                                             "data_finalizacao": now_iso
                                         }).eq("id", item_id).execute()
 
-                                        # 2. Insere na NOVA TABELA de desempenho
+                                        # 2. Insere na tabela de desempenho
                                         supabase.table("desempenho_fornecedores").insert({
                                             "pedido_id": item_id,
                                             "fornecedor": f_fornec,
