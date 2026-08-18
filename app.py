@@ -107,11 +107,8 @@ def formatar_tempo_decorrido(data_inicio_str, data_fim_str=None):
 # -----------------------------------------------------------------------------
 # 4. FUNÇÕES DE UPLOAD PARA O GOOGLE DRIVE
 # -----------------------------------------------------------------------------
-def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
-    hoje = datetime.datetime.now()
-    nome_pasta_mes = hoje.strftime("%m-%Y") 
-
-    query = f"'{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{nome_pasta_mes}' and trashed=false"
+def obter_ou_criar_subpasta(service, parent_folder_id, nome_pasta):
+    query = f"'{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{nome_pasta}' and trashed=false"
     
     resultados = service.files().list(
         q=query, 
@@ -127,7 +124,7 @@ def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
         return pastas[0]['id']
     else:
         file_metadata = {
-            'name': nome_pasta_mes,
+            'name': nome_pasta,
             'mimeType': 'application/vnd.google-apps.folder',
             'parents': [parent_folder_id]
         }
@@ -140,7 +137,7 @@ def obter_ou_criar_pasta_do_mes(service, parent_folder_id):
         return pasta_criada.get('id')
 
 
-def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf'):
+def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf', as_google_doc=False, nome_subpasta=None):
     try:
         if not GOOGLE_DRIVE_FOLDER_ID:
             st.error("❌ A variável 'GOOGLE_DRIVE_FOLDER_ID' não foi configurada nos Secrets!")
@@ -186,9 +183,19 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type='application/pdf'):
             creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
 
         service = build('drive', 'v3', credentials=creds)
-        pasta_destino_id = obter_ou_criar_pasta_do_mes(service, GOOGLE_DRIVE_FOLDER_ID)
+        
+        # Se não enviou o nome da subpasta, usa o mês/ano atual por padrão
+        if not nome_subpasta:
+            nome_subpasta = datetime.datetime.now().strftime("%m-%Y")
+            
+        pasta_destino_id = obter_ou_criar_subpasta(service, GOOGLE_DRIVE_FOLDER_ID, nome_subpasta)
 
         file_metadata = {'name': nome_arquivo, 'parents': [pasta_destino_id]}
+        
+        # Converte para Google Docs se solicitado
+        if as_google_doc:
+            file_metadata['mimeType'] = 'application/vnd.google-apps.document'
+            
         media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
         
         file = service.files().create(
@@ -292,7 +299,6 @@ with st.sidebar:
             st.session_state.is_adm = False
             st.rerun()
 
-        # --- LIMPEZA E EXPORTAÇÃO NO SIDEBAR ---
         if supabase:
             st.divider()
             with st.expander("🧹 Limpeza e Exportação das 3 Tabelas"):
@@ -811,6 +817,63 @@ if aba_gestao:
                     col_kpi1.metric("⏱️ Lead Time Médio", f"{lt_medio:.1f} dias")
                     col_kpi2.metric("🎯 OTIF / Qualidade", f"{otif_pct:.1f}%")
                     col_kpi3.metric("💳 Prazo Médio Pagto", f"{pmp_medio:.0f} dias")
+                    
+                    # --- BOTÃO: ANÁLISE IA QUINZENAL ---
+                    if st.button("🧠 Gerar Relatório de Desempenho Quinzenal (IA)"):
+                        with st.spinner("A IA está analisando os dados dos últimos 15 dias..."):
+                            hoje = datetime.datetime.now(datetime.timezone.utc)
+                            quinze_dias_atras = hoje - datetime.timedelta(days=15)
+                            
+                            dados_quinzena = []
+                            for d in res_kpi:
+                                try:
+                                    dt_criacao = datetime.datetime.fromisoformat(d.get("created_at").replace("Z", "+00:00"))
+                                    if dt_criacao >= quinze_dias_atras:
+                                        dados_quinzena.append(d)
+                                except Exception:
+                                    pass
+
+                            if not dados_quinzena:
+                                st.warning("⚠️ Não há dados de fornecedores registrados nos últimos 15 dias para analisar.")
+                            else:
+                                prompt_ia = f"""
+                                Você é um Especialista de Compras (Procurement).
+                                Analise os dados reais de fornecedores dos últimos 15 dias (abaixo) e escreva um relatório gerencial claro e profissional em texto.
+                                
+                                O relatório deve conter:
+                                1. Resumo Executivo da Quinzena (Como foi o desempenho geral?).
+                                2. Melhores Fornecedores (Destaque quem entregou rápido, no prazo e com qualidade OK).
+                                3. Gargalos e Fornecedores Problemáticos (Destaque quem atrasou ou não teve qualidade).
+                                4. Sugestões de Ação para as próximas compras.
+
+                                DADOS OBTIDOS PARA ANÁLISE:
+                                {json.dumps(dados_quinzena, ensure_ascii=False)}
+                                """
+                                
+                                resposta_ia = client.chat.completions.create(
+                                    model="gpt-4o-mini",
+                                    messages=[{"role": "user", "content": prompt_ia}]
+                                )
+                                
+                                relatorio_texto = resposta_ia.choices[0].message.content
+                                
+                                data_str = datetime.datetime.now().strftime("%d-%m-%Y")
+                                nome_arq = f"Relatorio_Inteligente_Fornecedores_{data_str}"
+                                
+                                # Salva o documento no Drive especificando a subpasta "Relatórios IA"
+                                link_relatorio = salvar_nf_no_drive(
+                                    relatorio_texto.encode('utf-8'), 
+                                    nome_arq, 
+                                    mime_type='text/plain',
+                                    as_google_doc=True,
+                                    nome_subpasta="Relatórios IA" # <--- Agora ele salva nesta pasta específica
+                                )
+                                
+                                if link_relatorio:
+                                    st.success("✅ Relatório de IA gerado e salvo como Google Doc na pasta 'Relatórios IA'!")
+                                    st.markdown(f"🔗 **[Clique aqui para abrir o Documento no Google Drive]({link_relatorio})**")
+                                    with st.expander("👀 Ver prévia da análise na tela"):
+                                        st.markdown(relatorio_texto)
                     st.divider()
             except Exception:
                 pass
