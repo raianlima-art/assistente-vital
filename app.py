@@ -770,24 +770,25 @@ else:
     aba_estoque = None
 
 # =============================================================================
-# ABA 0: PAINEL DE ESTOQUE (RESTRITO AO ESTOQUISTA)
+# ABA 0: PAINEL DE ESTOQUE (RESTRITO AO ESTOQUISTA - CONFERÊNCIA & FINALIZAÇÃO)
 # =============================================================================
 if aba_estoque:
     with aba_estoque:
-        st.subheader("📦 Conferência de Notas Fiscais (Estoque)")
-        st.info("Aqui você visualiza todas as Notas Fiscais anexadas para conferência no momento do recebimento da mercadoria.")
+        st.subheader("📦 Conferência & Recebimento de Mercadorias (Estoque)")
+        st.info("Aqui você confere os pedidos em trânsito e confirma o recebimento ao chegar a mercadoria.")
         
         if not supabase:
             st.warning("⚠️ O Supabase não está conectado.")
         else:
             query = supabase.table("solicitacoes_compras").select("*").order("id", desc=True).execute()
-            dados_nf = [item for item in query.data if item.get("link_nf")]
+            dados_nf = [item for item in query.data if item.get("status") in ["Aguardando entrega", "Aguardando NF"]]
             
             if not dados_nf:
-                st.info("Nenhuma Nota Fiscal disponível no momento.")
+                st.info("Nenhuma entrega pendente de conferência no momento.")
             else:
-                st.markdown(f"Exibindo **{len(dados_nf)}** pedido(s) com Nota Fiscal anexada:")
+                st.markdown(f"Exibindo **{len(dados_nf)}** pedido(s) aguardando recebimento:")
                 for item in dados_nf:
+                    item_id = item.get("id")
                     desc = item.get("item_descricao", "Sem descrição")
                     qtd = item.get("quantidade", 1)
                     ref = item.get("referencia", "N/A")
@@ -795,14 +796,69 @@ if aba_estoque:
                     link_nf = item.get("link_nf")
                     num_pedido = item.get("numero_pedido", "N/A")
                     status_atual = item.get("status", "Pendente")
+                    dt_prometida = item.get("data_prometida", "Não informada")
+                    fornecedor = item.get("fornecedor_vencedor", "N/A")
+                    prazo_pg = item.get("prazo_pagamento_dias", 30)
+                    created_at = item.get("created_at")
                     
-                    card_html = f"""<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                    nf_button_html = f'<a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir PDF da Nota Fiscal ↗</a>' if link_nf else '<span style="color: #64748b; font-size: 0.85rem; font-weight: 500;">⏳ Nota Fiscal pendente de anexo pelo ADM</span>'
+
+                    card_html = f"""<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                     <h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>
-                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>
-                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status atual:</b> {status_atual}</p>
-                    <a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir PDF da Nota Fiscal ↗</a>
+                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>
+                    <p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>
+                    <p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>
+                    {nf_button_html}
                     </div>"""
+                    
                     st.markdown(card_html, unsafe_allow_html=True)
+
+                    with st.expander(f"🏁 Confirmar Recebimento / Finalizar Item #{item_id}"):
+                        with st.form(f"form_fin_est_{item_id}"):
+                            col_e1, col_e2 = st.columns(2)
+                            with col_e1:
+                                f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today(), key=f"dt_ent_{item_id}")
+                            with col_e2:
+                                f_qualidade = st.selectbox("Qualidade OK (Sem defeitos/avarias)?", ["SIM", "NÃO"], key=f"qual_{item_id}")
+                            
+                            btn_confirm_est = st.form_submit_button("✅ Finalizar e Confirmar Recebimento")
+
+                            if btn_confirm_est:
+                                try:
+                                    dt_inicio = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+                                except Exception:
+                                    dt_inicio = datetime.date.today()
+
+                                try:
+                                    dt_prom_obj = datetime.datetime.strptime(str(dt_prometida), "%Y-%m-%d").date()
+                                except Exception:
+                                    dt_prom_obj = f_dt_entregue
+
+                                lead_time = (f_dt_entregue - dt_inicio).days
+                                no_prazo = f_dt_entregue <= dt_prom_obj
+                                otif = no_prazo and (f_qualidade == "SIM")
+                                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+                                supabase.table("solicitacoes_compras").update({
+                                    "status": "Finalizado",
+                                    "data_finalizacao": now_iso
+                                }).eq("id", item_id).execute()
+
+                                supabase.table("desempenho_fornecedores").insert({
+                                    "pedido_id": item_id,
+                                    "fornecedor": fornecedor,
+                                    "data_prometida": str(dt_prometida),
+                                    "data_entregue": f_dt_entregue.isoformat(),
+                                    "qualidade_ok": f_qualidade,
+                                    "prazo_pagamento_dias": prazo_pg,
+                                    "lead_time_dias": lead_time,
+                                    "otif_ok": otif
+                                }).execute()
+
+                                st.success("🏁 Recebimento registrado com sucesso e pedido finalizado!")
+                                st.rerun()
+
+                    st.divider()
 
 # =============================================================================
 # ABA 1: CHAT DO ASSISTENTE
@@ -1130,6 +1186,8 @@ if aba_gestao:
                     encaps = item.get("encapsulamento")
                     custo_est = item.get("custo_estimado")
                     num_pedido = item.get("numero_pedido")
+                    fornecedor = item.get("fornecedor_vencedor")
+                    data_prometida = item.get("data_prometida")
 
                     if status_atual == "Pendente":
                         cor_borda = "#f59e0b"
@@ -1146,8 +1204,8 @@ if aba_gestao:
                     rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
                     campos_extra_adm = ""
-                    if num_pedido:
-                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido}</p>'
+                    if num_pedido or fornecedor or data_prometida:
+                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"} | <b>📅 Prometido para:</b> {data_prometida or "N/A"}</p>'
                     if id_manut or compat or encaps or custo_est:
                         campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
@@ -1159,79 +1217,57 @@ if aba_gestao:
                         if link_nf:
                             st.success("📄 **Nota Fiscal Anexada!**")
                             st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
-                        elif status_atual == "Aguardando NF":
-                            st.info("📥 **Este pedido está aguardando o envio da Nota Fiscal:**")
-                            
-                            num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", key=f"input_ped_{item_id}")
-                            uploaded_nf = st.file_uploader("Anexar PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
-                            
-                            if st.button("💾 Salvar NF no Drive e Marcar como Aguardando entrega", key=f"btn_save_nf_{item_id}"):
-                                if not num_pedido_input.strip():
-                                    st.error("⚠️ Por favor, preencha o Número do Pedido de Compra antes de salvar!")
-                                elif not uploaded_nf:
-                                    st.error("⚠️ Por favor, anexe o PDF da Nota Fiscal!")
-                                else:
-                                    with st.spinner("Enviando arquivo e organizando pasta do mês no Google Drive..."):
-                                        bytes_data = uploaded_nf.read()
-                                        
-                                        desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-                                        nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                        
-                                        link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
-                                        if link_drive:
-                                            supabase.table("solicitacoes_compras").update({
-                                                "link_nf": link_drive,
+                        
+                        # Bloco de edição dos dados da compra (Anexo de PDF agora é Opcional)
+                        if status_atual in ["Aguardando NF", "Aguardando entrega"]:
+                            with st.expander("📝 Cadastrar / Atualizar Dados da Compra e NF"):
+                                with st.form(f"form_upload_nf_{item_id}"):
+                                    col_a1, col_a2 = st.columns(2)
+                                    with col_a1:
+                                        num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", value=num_pedido or "", key=f"input_ped_{item_id}")
+                                        f_fornec_input = st.text_input("Fornecedor Vencedor (Obrigatório):", value=fornecedor or "", key=f"input_forn_{item_id}")
+                                    with col_a2:
+                                        val_dt_prom = datetime.date.today()
+                                        if data_prometida:
+                                            try:
+                                                val_dt_prom = datetime.datetime.strptime(str(data_prometida), "%Y-%m-%d").date()
+                                            except Exception:
+                                                pass
+                                        f_dt_prometida_input = st.date_input("Data Estimada / Prometida de Entrega:", value=val_dt_prom, key=f"input_dtp_{item_id}")
+                                        f_paz_pg_input = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30, key=f"input_ppg_{item_id}")
+                                    
+                                    uploaded_nf = st.file_uploader("Anexar PDF da NF (Opcional - pode anexar depois):", type=["pdf"], key=f"file_nf_{item_id}")
+                                    btn_save_nf_adm = st.form_submit_button("💾 Salvar Dados da Compra")
+
+                                    if btn_save_nf_adm:
+                                        if not num_pedido_input.strip():
+                                            st.error("⚠️ Por favor, preencha o Número do Pedido de Compra!")
+                                        elif not f_fornec_input.strip():
+                                            st.error("⚠️ Por favor, preencha o Fornecedor Vencedor!")
+                                        else:
+                                            update_payload = {
                                                 "status": "Aguardando entrega",
-                                                "numero_pedido": num_pedido_input.strip()
-                                            }).eq("id", item_id).execute()
-                                            st.success("Nota Fiscal salva na pasta do mês no Drive com sucesso!")
+                                                "numero_pedido": num_pedido_input.strip(),
+                                                "fornecedor_vencedor": f_fornec_input.strip(),
+                                                "data_prometida": f_dt_prometida_input.isoformat(),
+                                                "prazo_pagamento_dias": f_paz_pg_input
+                                            }
+                                            
+                                            if uploaded_nf:
+                                                with st.spinner("Enviando arquivo para o Google Drive..."):
+                                                    bytes_data = uploaded_nf.read()
+                                                    desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                                    nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                                    
+                                                    link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo)
+                                                    if link_drive:
+                                                        update_payload["link_nf"] = link_drive
+                                                        st.success("Dados salvos e Nota Fiscal anexada com sucesso!")
+                                            else:
+                                                st.success("Dados da compra salvos com sucesso! O pedido mudou para 'Aguardando entrega'. A NF poderá ser anexada posteriormente.")
+
+                                            supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
                                             st.rerun()
-
-                        with st.expander("🏁 Registrar Dados de Entrega / Finalizar"):
-                            with st.form(f"form_fin_{item_id}"):
-                                c_fin1, c_fin2 = st.columns(2)
-                                with c_fin1:
-                                    f_fornec = st.text_input("Fornecedor Vencedor:")
-                                    f_dt_prometida = st.date_input("Data Prometida de Entrega:", value=datetime.date.today())
-                                    f_qualidade = st.selectbox("Qualidade OK (Sem defeitos)?", ["SIM", "NÃO"])
-                                with c_fin2:
-                                    f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today())
-                                    f_paz_pg = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30)
-                                
-                                btn_confirm_fin = st.form_submit_button("✅ Finalizar Pedido com Métricas")
-
-                                if btn_confirm_fin:
-                                    if not f_fornec.strip():
-                                        st.error("⚠️ Informe o nome do Fornecedor Vencedor!")
-                                    else:
-                                        try:
-                                            dt_inicio = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
-                                        except Exception:
-                                            dt_inicio = datetime.date.today()
-                                        
-                                        lead_time = (f_dt_entregue - dt_inicio).days
-                                        no_prazo = f_dt_entregue <= f_dt_prometida
-                                        otif = no_prazo and (f_qualidade == "SIM")
-                                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-                                        supabase.table("solicitacoes_compras").update({
-                                            "status": "Finalizado",
-                                            "data_finalizacao": now_iso
-                                        }).eq("id", item_id).execute()
-
-                                        supabase.table("desempenho_fornecedores").insert({
-                                            "pedido_id": item_id,
-                                            "fornecedor": f_fornec,
-                                            "data_prometida": f_dt_prometida.isoformat(),
-                                            "data_entregue": f_dt_entregue.isoformat(),
-                                            "qualidade_ok": f_qualidade,
-                                            "prazo_pagamento_dias": f_paz_pg,
-                                            "lead_time_dias": lead_time,
-                                            "otif_ok": otif
-                                        }).execute()
-
-                                        st.success("🏁 Pedido finalizado e métricas cadastradas na nova tabela!")
-                                        st.rerun()
 
                         col1, col2, col3 = st.columns(3)
                         with col1:
