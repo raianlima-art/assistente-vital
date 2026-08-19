@@ -961,30 +961,6 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
-        # SISTEMA DE MÓDULOS AUTOMÁTICOS (PLUGINS ADM NA BARRA LATERAL)
-        st.divider()
-        st.markdown("### 🧩 Módulos ADM")
-
-        if not os.path.exists("modulos"):
-            os.makedirs("modulos")
-
-        arquivos_modulos = glob.glob("modulos/*.py")
-
-        if not arquivos_modulos:
-            st.info("Nenhum módulo extra detectado.")
-
-        for arquivo_py in arquivos_modulos:
-            try:
-                nome_modulo = os.path.basename(arquivo_py)[:-3]
-                spec = importlib.util.spec_from_file_location(nome_modulo, arquivo_py)
-                modulo = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(modulo)
-
-                if hasattr(modulo, "iniciar"):
-                    modulo.iniciar()
-            except Exception as e:
-                st.error(f"Erro ao carregar módulo {arquivo_py}: {e}")
-
         st.divider()
         st.header("⚙️ Configurações Fixas")
 
@@ -1029,16 +1005,22 @@ with col_status2:
 st.divider()
 
 if st.session_state.is_adm:
-    aba_chat, aba_gestao = st.tabs(["💬 Assistente IA", "📋 Painel de Compras (ADM)"])
+    aba_chat, aba_gestao, aba_ferramentas = st.tabs([
+        "💬 Assistente IA",
+        "📋 Painel de Compras (ADM)",
+        "🧩 Ferramentas Extras",
+    ])
     aba_estoque = None
 elif st.session_state.is_estoque:
     aba_estoque = st.container()
     aba_chat = None
     aba_gestao = None
+    aba_ferramentas = None
 else:
     aba_chat = st.container()
     aba_gestao = None
     aba_estoque = None
+    aba_ferramentas = None
 
 # =============================================================================
 # ABA 0: PAINEL DE ESTOQUE (RESTRITO AO ESTOQUISTA)
@@ -1051,96 +1033,130 @@ if aba_estoque:
         if not supabase:
             st.warning("⚠️ O Supabase não está conectado.")
         else:
-            query = supabase.table("solicitacoes_compras").select("*").order("id", desc=True).execute()
-            dados_nf = [item for item in query.data if item.get("status") in ["Aguardando entrega", "Aguardando NF"]]
+            col_est1, col_est2 = st.columns(2)
+            with col_est1:
+                filtro_est_status = st.selectbox(
+                    "Filtrar por Status (Estoque):",
+                    [
+                        "Selecione para filtrar...",
+                        "Aguardando entrega",
+                        "Aguardando NF",
+                        "Todos Pendentes de Recebimento",
+                    ],
+                    index=0,
+                    key="select_est_status",
+                )
+            with col_est2:
+                filtro_est_filial = st.selectbox(
+                    "Filtrar por Filial:",
+                    ["Todas as Filiais", "Arco - São Paulo", "Ultrassom - São Paulo", "Outra"],
+                    index=0,
+                    key="select_est_filial",
+                )
 
-            if not dados_nf:
-                st.info("Nenhuma entrega pendente de conferência no momento.")
+            if filtro_est_status == "Selecione para filtrar...":
+                st.info("💡 Selecione um status acima para carregar as entregas pendentes de conferência.")
             else:
-                st.markdown(f"Exibindo **{len(dados_nf)}** pedido(s) aguardando recebimento:")
-                for item in dados_nf:
-                    item_id = item.get("id")
-                    desc = item.get("item_descricao", "Sem descrição")
-                    qtd = item.get("quantidade", 1)
-                    ref = item.get("referencia", "N/A")
-                    solic = item.get("solicitante", "N/A")
-                    link_nf = item.get("link_nf")
-                    link_cotacao = item.get("link_cotacao")
-                    num_pedido = item.get("numero_pedido", "N/A")
-                    status_atual = item.get("status", "Pendente")
-                    dt_prometida = item.get("data_prometida", "Não informada")
-                    fornecedor = item.get("fornecedor_vencedor", "N/A")
-                    prazo_pg = item.get("prazo_pagamento_dias", 30)
-                    created_at = item.get("created_at")
+                query = supabase.table("solicitacoes_compras").select("*").order("id", desc=True).execute()
 
-                    botoes_docs = ""
-                    if link_cotacao:
-                        botoes_docs += f'<a href="{link_cotacao}" target="_blank" style="background: #f0fdf4; color: #15803d; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bbf7d0; margin-right: 8px;">📊 Abrir Cotação ↗</a>'
-                    if link_nf:
-                        botoes_docs += f'<a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir Nota Fiscal ↗</a>'
-                    if not botoes_docs:
-                        botoes_docs = '<span style="color: #64748b; font-size: 0.85rem; font-weight: 500;">⏳ Documentos pendentes pelo ADM</span>'
+                if filtro_est_status == "Todos Pendentes de Recebimento":
+                    dados_nf = [item for item in query.data if item.get("status") in ["Aguardando entrega", "Aguardando NF"]]
+                else:
+                    dados_nf = [item for item in query.data if item.get("status") == filtro_est_status]
 
-                    card_html = (
-                        f'<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">'
-                        f'<h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>'
-                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>'
-                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>'
-                        f'<p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>'
-                        f'{botoes_docs}'
-                        f'</div>'
-                    )
+                if filtro_est_filial != "Todas as Filiais" and dados_nf:
+                    dados_nf = [
+                        item for item in dados_nf
+                        if normalizar_texto(filtro_est_filial) in normalizar_texto(item.get("solicitante", ""))
+                    ]
 
-                    st.markdown(card_html, unsafe_allow_html=True)
+                if not dados_nf:
+                    st.info("Nenhuma entrega encontrada para os filtros selecionados.")
+                else:
+                    st.markdown(f"Exibindo **{len(dados_nf)}** pedido(s) aguardando recebimento:")
+                    for item in dados_nf:
+                        item_id = item.get("id")
+                        desc = item.get("item_descricao", "Sem descrição")
+                        qtd = item.get("quantidade", 1)
+                        ref = item.get("referencia", "N/A")
+                        solic = item.get("solicitante", "N/A")
+                        link_nf = item.get("link_nf")
+                        link_cotacao = item.get("link_cotacao")
+                        num_pedido = item.get("numero_pedido", "N/A")
+                        status_atual = item.get("status", "Pendente")
+                        dt_prometida = item.get("data_prometida", "Não informada")
+                        fornecedor = item.get("fornecedor_vencedor", "N/A")
+                        prazo_pg = item.get("prazo_pagamento_dias", 30)
+                        created_at = item.get("created_at")
 
-                    with st.expander(f"🏁 Confirmar Recebimento / Finalizar Item #{item_id}"):
-                        with st.form(f"form_fin_est_{item_id}"):
-                            col_e1, col_e2 = st.columns(2)
-                            with col_e1:
-                                f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today(), key=f"dt_ent_{item_id}")
-                            with col_e2:
-                                f_qualidade = st.selectbox("Qualidade OK (Sem defeitos/avarias)?", ["SIM", "NÃO"], key=f"qual_{item_id}")
+                        botoes_docs = ""
+                        if link_cotacao:
+                            botoes_docs += f'<a href="{link_cotacao}" target="_blank" style="background: #f0fdf4; color: #15803d; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bbf7d0; margin-right: 8px;">📊 Abrir Cotação ↗</a>'
+                        if link_nf:
+                            botoes_docs += f'<a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir Nota Fiscal ↗</a>'
+                        if not botoes_docs:
+                            botoes_docs = '<span style="color: #64748b; font-size: 0.85rem; font-weight: 500;">⏳ Documentos pendentes pelo ADM</span>'
 
-                            btn_confirm_est = st.form_submit_button("✅ Finalizar e Confirmar Recebimento")
+                        card_html = (
+                            f'<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">'
+                            f'<h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>'
+                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>'
+                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>'
+                            f'<p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>'
+                            f'{botoes_docs}'
+                            f'</div>'
+                        )
 
-                            if btn_confirm_est:
-                                try:
-                                    dt_inicio = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
-                                except Exception:
-                                    dt_inicio = datetime.date.today()
+                        st.markdown(card_html, unsafe_allow_html=True)
 
-                                try:
-                                    dt_prom_obj = datetime.datetime.strptime(str(dt_prometida), "%Y-%m-%d").date()
-                                    dt_prom_salvar = dt_prom_obj.isoformat()
-                                except Exception:
-                                    dt_prom_obj = f_dt_entregue
-                                    dt_prom_salvar = f_dt_entregue.isoformat()
+                        with st.expander(f"🏁 Confirmar Recebimento / Finalizar Item #{item_id}"):
+                            with st.form(f"form_fin_est_{item_id}"):
+                                col_e1, col_e2 = st.columns(2)
+                                with col_e1:
+                                    f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today(), key=f"dt_ent_{item_id}")
+                                with col_e2:
+                                    f_qualidade = st.selectbox("Qualidade OK (Sem defeitos/avarias)?", ["SIM", "NÃO"], key=f"qual_{item_id}")
 
-                                lead_time = (f_dt_entregue - dt_inicio).days
-                                no_prazo = f_dt_entregue <= dt_prom_obj
-                                otif = no_prazo and (f_qualidade == "SIM")
-                                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                btn_confirm_est = st.form_submit_button("✅ Finalizar e Confirmar Recebimento")
 
-                                supabase.table("solicitacoes_compras").update({
-                                    "status": "Finalizado",
-                                    "data_finalizacao": now_iso,
-                                }).eq("id", item_id).execute()
+                                if btn_confirm_est:
+                                    try:
+                                        dt_inicio = datetime.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+                                    except Exception:
+                                        dt_inicio = datetime.date.today()
 
-                                supabase.table("desempenho_fornecedores").insert({
-                                    "pedido_id": item_id,
-                                    "fornecedor": fornecedor,
-                                    "data_prometida": dt_prom_salvar,
-                                    "data_entregue": f_dt_entregue.isoformat(),
-                                    "qualidade_ok": f_qualidade,
-                                    "prazo_pagamento_dias": prazo_pg,
-                                    "lead_time_dias": lead_time,
-                                    "otif_ok": otif,
-                                }).execute()
+                                    try:
+                                        dt_prom_obj = datetime.datetime.strptime(str(dt_prometida), "%Y-%m-%d").date()
+                                        dt_prom_salvar = dt_prom_obj.isoformat()
+                                    except Exception:
+                                        dt_prom_obj = f_dt_entregue
+                                        dt_prom_salvar = f_dt_entregue.isoformat()
 
-                                st.success("🏁 Recebimento registrado com sucesso e pedido finalizado!")
-                                st.rerun()
+                                    lead_time = (f_dt_entregue - dt_inicio).days
+                                    no_prazo = f_dt_entregue <= dt_prom_obj
+                                    otif = no_prazo and (f_qualidade == "SIM")
+                                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-                    st.divider()
+                                    supabase.table("solicitacoes_compras").update({
+                                        "status": "Finalizado",
+                                        "data_finalizacao": now_iso,
+                                    }).eq("id", item_id).execute()
+
+                                    supabase.table("desempenho_fornecedores").insert({
+                                        "pedido_id": item_id,
+                                        "fornecedor": fornecedor,
+                                        "data_prometida": dt_prom_salvar,
+                                        "data_entregue": f_dt_entregue.isoformat(),
+                                        "qualidade_ok": f_qualidade,
+                                        "prazo_pagamento_dias": prazo_pg,
+                                        "lead_time_dias": lead_time,
+                                        "otif_ok": otif,
+                                    }).execute()
+
+                                    st.success("🏁 Recebimento registrado com sucesso e pedido finalizado!")
+                                    st.rerun()
+
+                        st.divider()
 
 # =============================================================================
 # ABA 1: CHAT DO ASSISTENTE
@@ -1464,276 +1480,301 @@ if aba_gestao:
         if not supabase:
             st.warning("⚠️ O Supabase não está conectado.")
         else:
-            filtro_status = st.selectbox(
-                "Filtrar por Status:",
-                ["Pendente", "Aguardando entrega", "Aguardando NF", "Finalizado", "Recusado", "Todos (Com Histórico)"],
-                index=0,
-            )
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                filtro_status = st.selectbox(
+                    "Filtrar por Status:",
+                    [
+                        "Selecione para filtrar...",
+                        "Pendente",
+                        "Aguardando entrega",
+                        "Aguardando NF",
+                        "Finalizado",
+                        "Recusado",
+                        "Todos (Com Histórico)",
+                    ],
+                    index=0,
+                )
+            with col_f2:
+                filtro_filial = st.selectbox(
+                    "Filtrar por Filial:",
+                    ["Todas as Filiais", "Arco - São Paulo", "Ultrassom - São Paulo", "Outra"],
+                    index=0,
+                )
 
-            query = supabase.table("solicitacoes_compras").select("*")
-
-            if filtro_status != "Todos (Com Histórico)":
-                query = query.eq("status", filtro_status)
-
-            dados_compras = query.order("id", desc=True).execute().data
-
-            if not dados_compras:
-                st.info(f"Nenhuma solicitação encontrada para o filtro **'{filtro_status}'**.")
+            if filtro_status == "Selecione para filtrar...":
+                st.info("💡 Selecione um status acima para carregar as solicitações.")
             else:
-                st.markdown(f"Exibindo **{len(dados_compras)}** solicitação(ões):")
+                query = supabase.table("solicitacoes_compras").select("*")
 
-                for item in dados_compras:
-                    item_id = item.get("id")
-                    desc = item.get("item_descricao", "Sem descrição")
-                    qtd = item.get("quantidade", 1)
-                    ref = item.get("referencia", "N/A")
-                    motivo = item.get("motivo", "N/A")
-                    solic = item.get("solicitante", "N/A")
-                    link = item.get("link_produto", "#")
-                    status_atual = item.get("status", "Pendente")
-                    link_nf = item.get("link_nf")
-                    link_cotacao = item.get("link_cotacao")
-                    created_at = item.get("created_at")
-                    data_finalizacao = item.get("data_finalizacao")
+                if filtro_status != "Todos (Com Histórico)":
+                    query = query.eq("status", filtro_status)
 
-                    id_manut = item.get("id_manutencao")
-                    compat = item.get("compativel")
-                    encaps = item.get("encapsulamento")
-                    custo_est = item.get("custo_estimado")
-                    num_pedido = item.get("numero_pedido")
-                    fornecedor = item.get("fornecedor_vencedor")
-                    data_prometida = item.get("data_prometida")
+                dados_compras = query.order("id", desc=True).execute().data
 
-                    if status_atual == "Pendente":
-                        cor_borda = "#f59e0b"
-                    elif status_atual == "Aguardando entrega":
-                        cor_borda = "#10b981"
-                    elif status_atual == "Aguardando NF":
-                        cor_borda = "#2563eb"
-                    elif status_atual == "Finalizado":
-                        cor_borda = "#64748b"
-                    else:
-                        cor_borda = "#ef4444"
+                if filtro_filial != "Todas as Filiais" and dados_compras:
+                    dados_compras = [
+                        item for item in dados_compras
+                        if normalizar_texto(filtro_filial) in normalizar_texto(item.get("solicitante", ""))
+                    ]
 
-                    tempo_str = formatar_tempo_decorrido(created_at, data_finalizacao)
-                    rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
+                if not dados_compras:
+                    st.info(f"Nenhuma solicitação encontrada para o status **'{filtro_status}'** e filial **'{filtro_filial}'**.")
+                else:
+                    st.markdown(f"Exibindo **{len(dados_compras)}** solicitação(ões):")
 
-                    campos_extra_adm = ""
-                    if num_pedido or fornecedor or data_prometida:
-                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"} | <b>📅 Prometido para:</b> {data_prometida or "N/A"}</p>'
-                    if id_manut or compat or encaps or custo_est:
-                        campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
+                    for item in dados_compras:
+                        item_id = item.get("id")
+                        desc = item.get("item_descricao", "Sem descrição")
+                        qtd = item.get("quantidade", 1)
+                        ref = item.get("referencia", "N/A")
+                        motivo = item.get("motivo", "N/A")
+                        solic = item.get("solicitante", "N/A")
+                        link = item.get("link_produto", "#")
+                        status_atual = item.get("status", "Pendente")
+                        link_nf = item.get("link_nf")
+                        link_cotacao = item.get("link_cotacao")
+                        created_at = item.get("created_at")
+                        data_finalizacao = item.get("data_finalizacao")
 
-                    card_html = (
-                        f'<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">'
-                        f'<div style="display: flex; justify-content: space-between; align-items: center;">'
-                        f'<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>'
-                        f'<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>'
-                        f'</div>'
-                        f'<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>'
-                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>'
-                        f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>'
-                        f'{campos_extra_adm}'
-                        f'<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>'
-                        f'<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>'
-                        f'</div>'
-                    )
+                        id_manut = item.get("id_manutencao")
+                        compat = item.get("compativel")
+                        encaps = item.get("encapsulamento")
+                        custo_est = item.get("custo_estimado")
+                        num_pedido = item.get("numero_pedido")
+                        fornecedor = item.get("fornecedor_vencedor")
+                        data_prometida = item.get("data_prometida")
 
-                    with st.container():
-                        st.markdown(card_html, unsafe_allow_html=True)
+                        if status_atual == "Pendente":
+                            cor_borda = "#f59e0b"
+                        elif status_atual == "Aguardando entrega":
+                            cor_borda = "#10b981"
+                        elif status_atual == "Aguardando NF":
+                            cor_borda = "#2563eb"
+                        elif status_atual == "Finalizado":
+                            cor_borda = "#64748b"
+                        else:
+                            cor_borda = "#ef4444"
 
-                        if link_cotacao:
-                            st.info("📊 **Cotação Anexada!**")
-                            col_c_link1, col_c_link2 = st.columns([3, 1])
-                            with col_c_link1:
-                                st.markdown(f"🔗 [Clique aqui para abrir a Cotação no Google Drive]({link_cotacao})")
-                            with col_c_link2:
-                                if st.button("🗑️ Remover Cotação", key=f"btn_del_cot_{item_id}"):
-                                    supabase.table("solicitacoes_compras").update({"link_cotacao": None}).eq("id", item_id).execute()
-                                    st.success("Cotação removida deste pedido!")
-                                    st.rerun()
+                        tempo_str = formatar_tempo_decorrido(created_at, data_finalizacao)
+                        rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
-                        if link_nf:
-                            st.success("📄 **Nota Fiscal Anexada!**")
-                            st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
+                        campos_extra_adm = ""
+                        if num_pedido or fornecedor or data_prometida:
+                            campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"} | <b>📅 Prometido para:</b> {data_prometida or "N/A"}</p>'
+                        if id_manut or compat or encaps or custo_est:
+                            campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
 
-                        if status_atual in ["Pendente", "Aguardando NF", "Aguardando entrega"]:
-                            with st.expander("📊 Gerar Cotação Comparativa (Mínimo 3 Fornecedores)"):
-                                with st.form(f"form_gerar_cot_{item_id}"):
-                                    st.markdown("##### 🏢 Opção 1 (Fornecedor 1)")
-                                    col_c1, col_c2, col_c3 = st.columns(3)
-                                    with col_c1:
-                                        forn1_nome = st.text_input("Nome Fornecedor 1:", key=f"f1_n_{item_id}")
-                                    with col_c2:
-                                        forn1_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_p_{item_id}")
-                                    with col_c3:
-                                        forn1_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_f_{item_id}")
-                                    forn1_link = st.text_input("🔗 Link da Cotação / Produto 1 (Opcional):", key=f"f1_l_{item_id}")
+                        card_html = (
+                            f'<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">'
+                            f'<div style="display: flex; justify-content: space-between; align-items: center;">'
+                            f'<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>'
+                            f'<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>'
+                            f'</div>'
+                            f'<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>'
+                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>'
+                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>'
+                            f'{campos_extra_adm}'
+                            f'<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>'
+                            f'<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>'
+                            f'</div>'
+                        )
 
-                                    st.markdown("##### 🏢 Opção 2 (Fornecedor 2)")
-                                    col_c4, col_c5, col_c6 = st.columns(3)
-                                    with col_c4:
-                                        forn2_nome = st.text_input("Nome Fornecedor 2:", key=f"f2_n_{item_id}")
-                                    with col_c5:
-                                        forn2_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_p_{item_id}")
-                                    with col_c6:
-                                        forn2_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_f_{item_id}")
-                                    forn2_link = st.text_input("🔗 Link da Cotação / Produto 2 (Opcional):", key=f"f2_l_{item_id}")
+                        with st.container():
+                            st.markdown(card_html, unsafe_allow_html=True)
 
-                                    st.markdown("##### 🏢 Opção 3 (Fornecedor 3)")
-                                    col_c7, col_c8, col_c9 = st.columns(3)
-                                    with col_c7:
-                                        forn3_nome = st.text_input("Nome Fornecedor 3:", key=f"f3_n_{item_id}")
-                                    with col_c8:
-                                        forn3_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_p_{item_id}")
-                                    with col_c9:
-                                        forn3_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_f_{item_id}")
-                                    forn3_link = st.text_input("🔗 Link da Cotação / Produto 3 (Opcional):", key=f"f3_l_{item_id}")
+                            if link_cotacao:
+                                st.info("📊 **Cotação Anexada!**")
+                                col_c_link1, col_c_link2 = st.columns([3, 1])
+                                with col_c_link1:
+                                    st.markdown(f"🔗 [Clique aqui para abrir a Cotação no Google Drive]({link_cotacao})")
+                                with col_c_link2:
+                                    if st.button("🗑️ Remover Cotação", key=f"btn_del_cot_{item_id}"):
+                                        supabase.table("solicitacoes_compras").update({"link_cotacao": None}).eq("id", item_id).execute()
+                                        st.success("Cotação removida deste pedido!")
+                                        st.rerun()
 
-                                    btn_gerar_cot = st.form_submit_button("⚙️ Gerar Documento de Cotação em PDF & Salvar")
+                            if link_nf:
+                                st.success("📄 **Nota Fiscal Anexada!**")
+                                st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
 
-                                    if btn_gerar_cot:
-                                        opcoes = []
-                                        if forn1_nome.strip() and forn1_preco > 0:
-                                            tot1 = (forn1_preco * qtd) + forn1_frete
-                                            opcoes.append({"nome": forn1_nome.strip(), "pu": forn1_preco, "frete": forn1_frete, "total": tot1, "link": forn1_link.strip()})
-                                        if forn2_nome.strip() and forn2_preco > 0:
-                                            tot2 = (forn2_preco * qtd) + forn2_frete
-                                            opcoes.append({"nome": forn2_nome.strip(), "pu": forn2_preco, "frete": forn2_frete, "total": tot2, "link": forn2_link.strip()})
-                                        if forn3_nome.strip() and forn3_preco > 0:
-                                            tot3 = (forn3_preco * qtd) + forn3_frete
-                                            opcoes.append({"nome": forn3_nome.strip(), "pu": forn3_preco, "frete": forn3_frete, "total": tot3, "link": forn3_link.strip()})
+                            if status_atual in ["Pendente", "Aguardando NF", "Aguardando entrega"]:
+                                with st.expander("📊 Gerar Cotação Comparativa (Mínimo 3 Fornecedores)"):
+                                    with st.form(f"form_gerar_cot_{item_id}"):
+                                        st.markdown("##### 🏢 Opção 1 (Fornecedor 1)")
+                                        col_c1, col_c2, col_c3 = st.columns(3)
+                                        with col_c1:
+                                            forn1_nome = st.text_input("Nome Fornecedor 1:", key=f"f1_n_{item_id}")
+                                        with col_c2:
+                                            forn1_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_p_{item_id}")
+                                        with col_c3:
+                                            forn1_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_f_{item_id}")
+                                        forn1_link = st.text_input("🔗 Link da Cotação / Produto 1 (Opcional):", key=f"f1_l_{item_id}")
 
-                                        if len(opcoes) < 3:
-                                            st.error("⚠️ É obrigatório cadastrar no mínimo 3 fornecedores com preços válidos para gerar a cotação comparativa!")
-                                        else:
-                                            opcoes_ordenadas = sorted(opcoes, key=lambda x: x["total"])
-                                            vencedor = opcoes_ordenadas[0]
+                                        st.markdown("##### 🏢 Opção 2 (Fornecedor 2)")
+                                        col_c4, col_c5, col_c6 = st.columns(3)
+                                        with col_c4:
+                                            forn2_nome = st.text_input("Nome Fornecedor 2:", key=f"f2_n_{item_id}")
+                                        with col_c5:
+                                            forn2_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_p_{item_id}")
+                                        with col_c6:
+                                            forn2_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_f_{item_id}")
+                                        forn2_link = st.text_input("🔗 Link da Cotação / Produto 2 (Opcional):", key=f"f2_l_{item_id}")
 
-                                            tot1_val = opcoes_ordenadas[0]["total"]
-                                            tot2_val = opcoes_ordenadas[1]["total"]
-                                            tot3_val = opcoes_ordenadas[2]["total"]
+                                        st.markdown("##### 🏢 Opção 3 (Fornecedor 3)")
+                                        col_c7, col_c8, col_c9 = st.columns(3)
+                                        with col_c7:
+                                            forn3_nome = st.text_input("Nome Fornecedor 3:", key=f"f3_n_{item_id}")
+                                        with col_c8:
+                                            forn3_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_p_{item_id}")
+                                        with col_c9:
+                                            forn3_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_f_{item_id}")
+                                        forn3_link = st.text_input("🔗 Link da Cotação / Produto 3 (Opcional):", key=f"f3_l_{item_id}")
 
-                                            media_orcam = (tot1_val + tot2_val + tot3_val) / 3.0
-                                            preco_alvo = media_orcam * 0.90
-                                            valor_comprado = vencedor["total"]
-                                            economia_real = media_orcam - valor_comprado
-                                            status_meta_txt = "Atingida" if valor_comprado <= preco_alvo else "Não Atingida"
+                                        btn_gerar_cot = st.form_submit_button("⚙️ Gerar Documento de Cotação em PDF & Salvar")
 
-                                            if supabase:
+                                        if btn_gerar_cot:
+                                            opcoes = []
+                                            if forn1_nome.strip() and forn1_preco > 0:
+                                                tot1 = (forn1_preco * qtd) + forn1_frete
+                                                opcoes.append({"nome": forn1_nome.strip(), "pu": forn1_preco, "frete": forn1_frete, "total": tot1, "link": forn1_link.strip()})
+                                            if forn2_nome.strip() and forn2_preco > 0:
+                                                tot2 = (forn2_preco * qtd) + forn2_frete
+                                                opcoes.append({"nome": forn2_nome.strip(), "pu": forn2_preco, "frete": forn2_frete, "total": tot2, "link": forn2_link.strip()})
+                                            if forn3_nome.strip() and forn3_preco > 0:
+                                                tot3 = (forn3_preco * qtd) + forn3_frete
+                                                opcoes.append({"nome": forn3_nome.strip(), "pu": forn3_preco, "frete": forn3_frete, "total": tot3, "link": forn3_link.strip()})
+
+                                            if len(opcoes) < 3:
+                                                st.error("⚠️ É obrigatório cadastrar no mínimo 3 fornecedores com preços válidos para gerar a cotação comparativa!")
+                                            else:
+                                                opcoes_ordenadas = sorted(opcoes, key=lambda x: x["total"])
+                                                vencedor = opcoes_ordenadas[0]
+
+                                                tot1_val = opcoes_ordenadas[0]["total"]
+                                                tot2_val = opcoes_ordenadas[1]["total"]
+                                                tot3_val = opcoes_ordenadas[2]["total"]
+
+                                                media_orcam = (tot1_val + tot2_val + tot3_val) / 3.0
+                                                preco_alvo = media_orcam * 0.90
+                                                valor_comprado = vencedor["total"]
+                                                economia_real = media_orcam - valor_comprado
+                                                status_meta_txt = "Atingida" if valor_comprado <= preco_alvo else "Não Atingida"
+
+                                                if supabase:
+                                                    try:
+                                                        supabase.table("cotacoes").insert({
+                                                            "data_cotacao": datetime.date.today().isoformat(),
+                                                            "produto": desc,
+                                                            "fornecedor_a": f"{opcoes_ordenadas[0]['nome']} (R$ {formar_real(tot1_val)})",
+                                                            "valor_a": float(tot1_val),
+                                                            "fornecedor_b": f"{opcoes_ordenadas[1]['nome']} (R$ {formar_real(tot2_val)})",
+                                                            "valor_b": float(tot2_val),
+                                                            "fornecedor_c": f"{opcoes_ordenadas[2]['nome']} (R$ {formar_real(tot3_val)})",
+                                                            "valor_c": float(tot3_val),
+                                                            "media_orcam": float(media_orcam),
+                                                            "preco_alvo": float(preco_alvo),
+                                                            "valor_comprado": float(valor_comprado),
+                                                            "economia_real": float(economia_real),
+                                                            "status_meta": status_meta_txt,
+                                                            "solicitante": solic,
+                                                            "pedido_id": int(item_id),
+                                                        }).execute()
+                                                    except Exception as e_cot:
+                                                        st.error(f"⚠️ Erro ao gravar no Supabase: {e_cot}")
+
+                                                pdf_ind_bytes = gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas, vencedor)
+                                                desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                                nome_arq_ind = f"Cotacao_Sistema_{item_id}_{desc_limpa}.pdf"
+
+                                                mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+
+                                                link_cot_gerada = salvar_nf_no_drive(
+                                                    pdf_ind_bytes,
+                                                    nome_arq_ind,
+                                                    mime_type="application/pdf",
+                                                    as_google_doc=False,
+                                                    nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
+                                                )
+
+                                                if link_cot_gerada:
+                                                    supabase.table("solicitacoes_compras").update({
+                                                        "link_cotacao": link_cot_gerada,
+                                                        "fornecedor_vencedor": vencedor["nome"],
+                                                    }).eq("id", item_id).execute()
+                                                    st.success(f"✅ Cotação Vital C salva em PDF! Vencedor: {vencedor['nome']} (R$ {formar_real(vencedor['total'])})")
+                                                    st.rerun()
+
+                                with st.expander("📝 Cadastrar / Atualizar Dados da Compra e NF"):
+                                    with st.form(f"form_upload_nf_{item_id}"):
+                                        col_a1, col_a2 = st.columns(2)
+                                        with col_a1:
+                                            num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", value=num_pedido or "", key=f"input_ped_{item_id}")
+                                            f_fornec_input = st.text_input("Fornecedor Vencedor (Obrigatório):", value=fornecedor or "", key=f"input_forn_{item_id}")
+                                        with col_a2:
+                                            val_dt_prom = datetime.date.today()
+                                            if data_prometida:
                                                 try:
-                                                    supabase.table("cotacoes").insert({
-                                                        "data_cotacao": datetime.date.today().isoformat(),
-                                                        "produto": desc,
-                                                        "fornecedor_a": f"{opcoes_ordenadas[0]['nome']} (R$ {formar_real(tot1_val)})",
-                                                        "valor_a": float(tot1_val),
-                                                        "fornecedor_b": f"{opcoes_ordenadas[1]['nome']} (R$ {formar_real(tot2_val)})",
-                                                        "valor_b": float(tot2_val),
-                                                        "fornecedor_c": f"{opcoes_ordenadas[2]['nome']} (R$ {formar_real(tot3_val)})",
-                                                        "valor_c": float(tot3_val),
-                                                        "media_orcam": float(media_orcam),
-                                                        "preco_alvo": float(preco_alvo),
-                                                        "valor_comprado": float(valor_comprado),
-                                                        "economia_real": float(economia_real),
-                                                        "status_meta": status_meta_txt,
-                                                        "solicitante": solic,
-                                                        "pedido_id": int(item_id),
-                                                    }).execute()
-                                                except Exception as e_cot:
-                                                    st.error(f"⚠️ Erro ao gravar no Supabase: {e_cot}")
+                                                    val_dt_prom = datetime.datetime.strptime(str(data_prometida), "%Y-%m-%d").date()
+                                                except Exception:
+                                                    pass
+                                            f_dt_prometida_input = st.date_input("Data Estimada / Prometida de Entrega:", value=val_dt_prom, key=f"input_dtp_{item_id}")
+                                            f_paz_pg_input = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30, key=f"input_ppg_{item_id}")
 
-                                            pdf_ind_bytes = gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas, vencedor)
-                                            desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-                                            nome_arq_ind = f"Cotacao_Sistema_{item_id}_{desc_limpa}.pdf"
+                                        uploaded_cot = st.file_uploader("Anexar PDF da Cotação Externa (Opcional):", type=["pdf"], key=f"file_cot_{item_id}")
+                                        uploaded_nf = st.file_uploader("Anexar PDF da NF (Opcional - pode anexar depois):", type=["pdf"], key=f"file_nf_{item_id}")
+                                        btn_save_nf_adm = st.form_submit_button("💾 Salvar Dados da Compra e Anexos")
 
-                                            mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                            dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+                                        if btn_save_nf_adm:
+                                            if not num_pedido_input.strip():
+                                                st.error("⚠️ Por favor, preencha o Número do Pedido de Compra!")
+                                            elif not f_fornec_input.strip():
+                                                st.error("⚠️ Por favor, preencha o Fornecedor Vencedor!")
+                                            else:
+                                                update_payload = {
+                                                    "status": "Aguardando entrega",
+                                                    "numero_pedido": num_pedido_input.strip(),
+                                                    "fornecedor_vencedor": f_fornec_input.strip(),
+                                                    "data_prometida": f_dt_prometida_input.isoformat(),
+                                                    "prazo_pagamento_dias": f_paz_pg_input,
+                                                }
 
-                                            link_cot_gerada = salvar_nf_no_drive(
-                                                pdf_ind_bytes,
-                                                nome_arq_ind,
-                                                mime_type="application/pdf",
-                                                as_google_doc=False,
-                                                nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
-                                            )
+                                                desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
 
-                                            if link_cot_gerada:
-                                                supabase.table("solicitacoes_compras").update({
-                                                    "link_cotacao": link_cot_gerada,
-                                                    "fornecedor_vencedor": vencedor["nome"],
-                                                }).eq("id", item_id).execute()
-                                                st.success(f"✅ Cotação Vital C salva em PDF! Vencedor: {vencedor['nome']} (R$ {formar_real(vencedor['total'])})")
+                                                if uploaded_cot:
+                                                    with st.spinner("Enviando Cotação para o Google Drive..."):
+                                                        bytes_cot = uploaded_cot.read()
+                                                        nome_cot = f"Cotacao_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+
+                                                        mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                        dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+
+                                                        link_cot_drive = salvar_nf_no_drive(
+                                                            bytes_cot,
+                                                            nome_cot,
+                                                            nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
+                                                        )
+
+                                                        if link_cot_drive:
+                                                            update_payload["link_cotacao"] = link_cot_drive
+
+                                                if uploaded_nf:
+                                                    with st.spinner("Enviando Nota Fiscal para o Google Drive..."):
+                                                        bytes_data = uploaded_nf.read()
+                                                        nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                                        mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                        link_drive = salvar_nf_no_drive(
+                                                            bytes_data,
+                                                            nome_arquivo,
+                                                            nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano],
+                                                        )
+                                                        if link_drive:
+                                                            update_payload["link_nf"] = link_drive
+
+                                                supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
+                                                st.success("Dados da compra e documentos salvos com sucesso!")
                                                 st.rerun()
-
-                            with st.expander("📝 Cadastrar / Atualizar Dados da Compra e NF"):
-                                with st.form(f"form_upload_nf_{item_id}"):
-                                    col_a1, col_a2 = st.columns(2)
-                                    with col_a1:
-                                        num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", value=num_pedido or "", key=f"input_ped_{item_id}")
-                                        f_fornec_input = st.text_input("Fornecedor Vencedor (Obrigatório):", value=fornecedor or "", key=f"input_forn_{item_id}")
-                                    with col_a2:
-                                        val_dt_prom = datetime.date.today()
-                                        if data_prometida:
-                                            try:
-                                                val_dt_prom = datetime.datetime.strptime(str(data_prometida), "%Y-%m-%d").date()
-                                            except Exception:
-                                                pass
-                                        f_dt_prometida_input = st.date_input("Data Estimada / Prometida de Entrega:", value=val_dt_prom, key=f"input_dtp_{item_id}")
-                                        f_paz_pg_input = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30, key=f"input_ppg_{item_id}")
-
-                                    uploaded_cot = st.file_uploader("Anexar PDF da Cotação Externa (Opcional):", type=["pdf"], key=f"file_cot_{item_id}")
-                                    uploaded_nf = st.file_uploader("Anexar PDF da NF (Opcional - pode anexar depois):", type=["pdf"], key=f"file_nf_{item_id}")
-                                    btn_save_nf_adm = st.form_submit_button("💾 Salvar Dados da Compra e Anexos")
-
-                                    if btn_save_nf_adm:
-                                        if not num_pedido_input.strip():
-                                            st.error("⚠️ Por favor, preencha o Número do Pedido de Compra!")
-                                        elif not f_fornec_input.strip():
-                                            st.error("⚠️ Por favor, preencha o Fornecedor Vencedor!")
-                                        else:
-                                            update_payload = {
-                                                "status": "Aguardando entrega",
-                                                "numero_pedido": num_pedido_input.strip(),
-                                                "fornecedor_vencedor": f_fornec_input.strip(),
-                                                "data_prometida": f_dt_prometida_input.isoformat(),
-                                                "prazo_pagamento_dias": f_paz_pg_input,
-                                            }
-
-                                            desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-
-                                            if uploaded_cot:
-                                                with st.spinner("Enviando Cotação para o Google Drive..."):
-                                                    bytes_cot = uploaded_cot.read()
-                                                    nome_cot = f"Cotacao_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-
-                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                    dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
-
-                                                    link_cot_drive = salvar_nf_no_drive(
-                                                        bytes_cot,
-                                                        nome_cot,
-                                                        nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
-                                                    )
-
-                                                    if link_cot_drive:
-                                                        update_payload["link_cotacao"] = link_cot_drive
-
-                                            if uploaded_nf:
-                                                with st.spinner("Enviando Nota Fiscal para o Google Drive..."):
-                                                    bytes_data = uploaded_nf.read()
-                                                    nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                    link_drive = salvar_nf_no_drive(
-                                                        bytes_data,
-                                                        nome_arquivo,
-                                                        nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano],
-                                                    )
-                                                    if link_drive:
-                                                        update_payload["link_nf"] = link_drive
-
-                                            supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
-                                            st.success("Dados da compra e documentos salvos com sucesso!")
-                                            st.rerun()
 
                         col1, col2, col3 = st.columns(3)
                         with col1:
@@ -1754,3 +1795,31 @@ if aba_gestao:
                                 st.rerun()
 
                         st.divider()
+
+# =============================================================================
+# ABA 3: FERRAMENTAS E MÓDULOS EXTRAS (RESTRITO AO MODO ADM)
+# =============================================================================
+if aba_ferramentas:
+    with aba_ferramentas:
+        st.subheader("🧩 Módulos e Ferramentas Extras")
+        st.info("Central de extensões e ferramentas adicionais do sistema.")
+
+        if not os.path.exists("modulos"):
+            os.makedirs("modulos")
+
+        arquivos_modulos = glob.glob("modulos/*.py")
+
+        if not arquivos_modulos:
+            st.warning("Nenhum módulo extra encontrado na pasta 'modulos'.")
+        else:
+            for arquivo_py in arquivos_modulos:
+                try:
+                    nome_modulo = os.path.basename(arquivo_py)[:-3]
+                    spec = importlib.util.spec_from_file_location(nome_modulo, arquivo_py)
+                    modulo = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(modulo)
+
+                    if hasattr(modulo, "iniciar"):
+                        modulo.iniciar()
+                except Exception as e:
+                    st.error(f"Erro ao carregar o módulo {arquivo_py}: {e}")
