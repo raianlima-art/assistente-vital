@@ -619,7 +619,14 @@ def gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas
     for idx, op in enumerate(opcoes_ordenadas, 1):
         is_aprovado = idx == 1
         st_badge = Paragraph("APROVADO", aprov_style) if is_aprovado else Paragraph("Cotação", opc_style)
-        link_str = f"<font color='#0284c7'><u>Acessar Cotação</u></font>" if op.get("link") else "Sem link"
+
+        url = op.get("link", "").strip() if op.get("link") else ""
+        if url:
+            if not (url.startswith("http://") or url.startswith("https://")):
+                url = "https://" + url
+            link_str = f'<a href="{url}"><font color="#0284c7"><u>Acessar Cotação</u></font></a>'
+        else:
+            link_str = "Sem link"
 
         row = [
             Paragraph(op["nome"], td_bold if is_aprovado else td_style),
