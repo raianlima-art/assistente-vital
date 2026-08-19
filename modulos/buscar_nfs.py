@@ -47,7 +47,7 @@ def iniciar():
     Função principal que o app.py chama automaticamente.
     Cria a interface (sanfona) de busca no painel de módulos.
     """
-    with st.expander("🔍 Buscador Rápido de Notas Fiscais e Cotações no Drive", expanded=False):
+    with st.expander("🔍 Buscador de NFs & Cotações", expanded=False):
         st.markdown(
             "Pesquise documentos no Google Drive diretamente por aqui. "
             "Você pode buscar pelo **Número do Pedido**, **Fornecedor** ou **Descrição do item**."

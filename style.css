@@ -1,0 +1,192 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* --- CONFIGURAÇÕES GERAIS --- */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #1e293b;
+    background-color: #f8fafc;
+}
+
+#MainMenu, footer, [data-testid="stHeader"] {
+    visibility: hidden;
+    background: transparent;
+}
+
+/* --- CABEÇALHO PRINCIPAL (FLAT CLEAN) --- */
+.main-header {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    padding: 20px 24px;
+    border-radius: 12px;
+    text-align: center;
+    margin-bottom: 20px;
+    box-shadow: none !important;
+}
+
+.main-header h1 {
+    color: #0f172a !important;
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    letter-spacing: -0.02em;
+}
+
+.main-header p {
+    color: #64748b;
+    font-size: 0.875rem;
+    margin: 4px 0 0 0;
+}
+
+/* --- ABAS (NAVEGAÇÃO FLAT) --- */
+[data-baseweb="tab-list"] {
+    gap: 6px;
+    background-color: #f1f5f9;
+    padding: 4px;
+    border-radius: 50px;
+    border: none;
+    margin-bottom: 24px;
+}
+
+[data-baseweb="tab"] {
+    border-radius: 50px;
+    padding: 8px 18px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #64748b;
+    background: transparent;
+    border: none !important;
+    transition: all 0.15s ease;
+}
+
+[data-baseweb="tab"]:hover {
+    color: #0f172a;
+}
+
+[data-baseweb="tab"][aria-selected="true"] {
+    background-color: #ffffff !important;
+    color: #2563eb !important;
+    font-weight: 600;
+    box-shadow: none !important;
+}
+
+[data-baseweb="tab-border"] {
+    display: none !important;
+}
+
+/* --- CARDS / EXPANDERS (FLAT MINIMALISTA) --- */
+[data-testid="stExpander"] {
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    background-color: #ffffff !important;
+    margin-bottom: 10px !important;
+    box-shadow: none !important;
+    transition: border-color 0.15s ease !important;
+}
+
+[data-testid="stExpander"]:hover {
+    border-color: #cbd5e1 !important;
+}
+
+[data-testid="stExpander"] summary {
+    font-weight: 500 !important;
+    font-size: 0.925rem !important;
+    color: #334155 !important;
+    padding: 12px 16px !important;
+    border-radius: 12px !important;
+}
+
+[data-testid="stExpander"] summary:hover {
+    color: #2563eb !important;
+    background-color: #f8fafc !important;
+}
+
+[data-testid="stExpander"] > div[role="region"] {
+    padding: 16px 20px 20px 20px !important;
+    border-top: 1px solid #f1f5f9 !important;
+}
+
+/* --- BOTÕES FLAT MINIMALISTAS (100% RETOS / PÍLULA LISO) --- */
+div.stButton, div.stFormSubmitButton {
+    width: 100% !important;
+}
+
+div.stButton > button:first-child,
+div.stFormSubmitButton > button:first-child {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    border: 1px solid transparent !important;
+    border-radius: 50px !important; /* Formato Pílula Flat */
+    padding: 0.5rem 1rem !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
+    letter-spacing: 0.01em !important;
+    box-shadow: none !important; /* Zero sombras 3D */
+    width: 100% !important;
+    min-height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease !important;
+}
+
+div.stButton > button:first-child:hover,
+div.stFormSubmitButton > button:first-child:hover {
+    background-color: #1d4ed8 !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
+div.stButton > button:first-child:active,
+div.stFormSubmitButton > button:first-child:active {
+    background-color: #1e40af !important;
+    box-shadow: none !important;
+}
+
+/* --- CAMPOS DE ENTRADA E SELECTS (FLAT) --- */
+.stTextInput input, .stNumberInput input, .stSelectbox > div > div {
+    border-radius: 8px !important;
+    border: 1px solid #cbd5e1 !important;
+    background-color: #ffffff !important;
+    font-size: 0.875rem !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+}
+
+.stTextInput input:focus, .stNumberInput input:focus, .stSelectbox > div > div:focus-within {
+    border-color: #2563eb !important;
+    box-shadow: none !important;
+}
+
+/* --- BARRA LATERAL (SIDEBAR) --- */
+[data-testid="stSidebar"] {
+    background-color: #f8fafc;
+    border-right: 1px solid #e2e8f0;
+}
+
+/* --- ALERTAS E INFORMAÇÕES (FLAT) --- */
+.stAlert {
+    border-radius: 8px !important;
+    border: 1px solid #dbeafe !important;
+    background-color: #eff6ff !important;
+    color: #1e40af !important;
+    padding: 10px 14px !important;
+    font-size: 0.85rem !important;
+    box-shadow: none !important;
+}
+
+.stAlert p {
+    color: #1e40af !important;
+}
+
+/* --- MESSAGES / CHAT (FLAT) --- */
+[data-testid="stChatMessage"] {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 10px !important;
+    padding: 12px 16px !important;
+    margin-bottom: 8px !important;
+    box-shadow: none !important;
+}

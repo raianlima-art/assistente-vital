@@ -394,7 +394,7 @@ def converter_backup_csv_para_pdf(dados_csv, nome_periodo='HISTÓRICO'):
 # FUNÇÃO AUTOMÁTICA LIDA PELO APP.PY
 # =========================================================================
 def iniciar():
-    with st.expander('📂 Gerar Relatório em PDF de Backup Antigo (Drive)'):
+    with st.expander("📁 Relatório de Backup", expanded=False):
         if st.button('🔍 Buscar Backups Salvos no Drive'):
             try:
                 creds_raw = get_secret('GOOGLE_DRIVE_CREDENTIALS')

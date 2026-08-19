@@ -87,7 +87,7 @@ def salvar_no_drive(file_bytes, nome_arquivo, mime_type="text/csv", nome_subpast
 
 
 def iniciar():
-    with st.expander("🧹 Limpeza e Exportação das 3 Tabelas", expanded=False):
+    with st.expander("🧹 Limpeza & Exportação", expanded=False):
         st.info("Exporta compras finalizadas, desempenho de fornecedores e cotações para o Google Drive e limpa do Supabase.")
         adm_pass = get_secret("ADM_PASSWORD", "admin123")
         senha_export = st.text_input("Confirme a Senha ADM:", type="password", key="senha_exp_mod")

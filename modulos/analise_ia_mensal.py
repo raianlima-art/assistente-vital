@@ -42,7 +42,7 @@ def formar_real(valor):
 
 
 def iniciar():
-    with st.expander("🤖 Diagnóstico e Análise Mensal com IA", expanded=False):
+    with st.expander("🤖 Análise Mensal IA", expanded=False):
         st.caption("Gera um parecer executivo sobre o volume de compras, economia gerada, metas atingidas e oportunidades de negociação.")
 
         col1, col2 = st.columns(2)

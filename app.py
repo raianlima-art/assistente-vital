@@ -10,6 +10,7 @@ import smtplib
 import unicodedata
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from geopy.distance import geodesic
@@ -66,114 +67,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-custom_css = """
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
 
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stHeader"] {background: transparent;}
+def carregar_css(caminho="style.css"):
+    if os.path.exists(caminho):
+        with open(caminho, "r", encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-    .main-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e3c72 100%);
-        padding: 22px 25px;
-        border-radius: 16px;
-        color: white;
-        text-align: center;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-    }
-    .main-header h1 {
-        color: #ffffff !important;
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        margin: 0 !important;
-        letter-spacing: -0.5px;
-    }
-    .main-header p {
-        color: #94a3b8;
-        font-size: 0.9rem;
-        margin: 4px 0 0 0;
-    }
 
-    div.stButton > button:first-child {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 0.6rem 1.2rem;
-        font-weight: 600;
-        letter-spacing: 0.5px;
-        transition: all 0.25s ease;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.08);
-        width: 100%;
-    }
-    div.stButton > button:first-child:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(42, 82, 152, 0.25);
-        color: white;
-    }
-
-    .stTextInput input, .stNumberInput input, .stSelectbox > div > div {
-        border-radius: 8px !important;
-        border: 1px solid #cbd5e1 !important;
-        background-color: #ffffff !important;
-        transition: all 0.2s ease-in-out;
-    }
-    .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox > div > div:focus-within {
-        border-color: #2a5298 !important;
-        box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.15) !important;
-    }
-
-    [data-testid="stSidebar"] {
-        background-color: #f8fafc;
-        border-right: 1px solid #e2e8f0;
-    }
-
-    [data-testid="stExpander"] {
-        border: 1px solid #e2e8f0 !important;
-        border-radius: 10px !important;
-        background-color: #ffffff !important;
-        margin-bottom: 12px !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
-    }
-
-    [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #f1f5f9;
-        padding: 6px;
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
-    }
-    [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 8px 18px;
-        font-weight: 600;
-        color: #64748b;
-        background: transparent;
-        border: none !important;
-    }
-    [data-baseweb="tab"][aria-selected="true"] {
-        background-color: #ffffff !important;
-        color: #1e3c72 !important;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-    }
-
-    [data-testid="stChatMessage"] {
-        padding: 14px 18px;
-        border-radius: 14px;
-        margin-bottom: 12px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
-    }
-</style>
-"""
-st.markdown(custom_css, unsafe_allow_html=True)
+carregar_css()
 
 # -----------------------------------------------------------------------------
 # 3. INICIALIZAÇÃO DE CONEXÕES
@@ -192,24 +93,7 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
         st.sidebar.warning(f"⚠️ Supabase offline: {e}")
 
 # -----------------------------------------------------------------------------
-# 4. VALORES DE CONFIGURAÇÕES FIXAS (ESCOPO GLOBAL)
-# -----------------------------------------------------------------------------
-ipva = 10000.0
-seguro = 10000.0
-manut_anual = 10000.0
-dias_uteis = 365
-valor_alimentacao_dia = 70.0
-valor_pernoite = 250.0
-consumo = 8.0
-preco_diesel = 8.00
-diaria_motorista = 200.0
-fator_estrada = 0.25
-margem = 20
-custo_fixo_diaria = (ipva + seguro + manut_anual) / dias_uteis
-
-
-# -----------------------------------------------------------------------------
-# 5. FUNÇÕES AUXILIARES E GERADORES DE PDF EM REPORTLAB
+# 4. FUNÇÕES AUXILIARES
 # -----------------------------------------------------------------------------
 def normalizar_texto(texto):
     if not texto:
@@ -218,9 +102,58 @@ def normalizar_texto(texto):
     return "".join([c for c in nfkd if not unicodedata.combining(c)]).lower().strip()
 
 
+def extrair_nome_fornecedor(url):
+    """Identifica automaticamente o nome do fornecedor/loja através da URL do produto."""
+    if not url or not isinstance(url, str) or url == "#" or not url.strip():
+        return ""
+    
+    u = url.lower().strip()
+    if "mercadolivre" in u or "mercadolibre" in u:
+        return "Mercado Livre"
+    if "aliexpress" in u:
+        return "AliExpress"
+    if "amazon" in u:
+        return "Amazon"
+    if "shopee" in u:
+        return "Shopee"
+    if "kabum" in u:
+        return "KaBuM!"
+    if "magazineluiza" in u or "magalu" in u:
+        return "Magalu"
+    if "lojadomecanico" in u:
+        return "Loja do Mecânico"
+    if "alibaba" in u:
+        return "Alibaba"
+    
+    try:
+        if not u.startswith(("http://", "https://")):
+            u = "https://" + u
+        domain = urlparse(u).netloc
+        partes = domain.replace("www.", "").split(".")
+        if partes and partes[0]:
+            return partes[0].capitalize()
+    except Exception:
+        pass
+    return ""
+
+
+def converter_valor_float(valor_input):
+    if not valor_input:
+        return 0.0
+    try:
+        v_str = str(valor_input).replace("R$", "").strip()
+        if "," in v_str and "." in v_str:
+            v_str = v_str.replace(".", "").replace(",", ".")
+        elif "," in v_str:
+            v_str = v_str.replace(",", ".")
+        return float(v_str)
+    except Exception:
+        return 0.0
+
+
 def formatar_tempo_decorrido(data_inicio_str, data_fim_str=None):
     if not data_inicio_str:
-        return "Data indisponível"
+        return "N/D"
     try:
         data_inicio_clean = data_inicio_str.replace("Z", "+00:00")
         inicio = datetime.datetime.fromisoformat(data_inicio_clean)
@@ -239,11 +172,11 @@ def formatar_tempo_decorrido(data_inicio_str, data_fim_str=None):
         if dias > 0:
             return f"{dias}d {horas}h"
         elif horas > 0:
-            return f"{horas}h {minutos}min"
+            return f"{horas}h {minutos}m"
         else:
-            return f"{minutos} min"
+            return f"{minutos}m"
     except Exception:
-        return "Tempo n/d"
+        return "N/D"
 
 
 def formar_real(valor):
@@ -261,6 +194,118 @@ def formar_real(valor):
         return "{:,.2f}".format(val).replace(",", "X").replace(".", ",").replace("X", ".")
     except Exception:
         return "0,00"
+
+
+def obter_servico_drive():
+    try:
+        if not GOOGLE_DRIVE_FOLDER_ID:
+            return None
+        SCOPES = ["https://www.googleapis.com/auth/drive"]
+        if os.path.exists("credentials.json"):
+            creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+        else:
+            creds_raw = get_secret("GOOGLE_DRIVE_CREDENTIALS")
+            if not creds_raw:
+                return None
+            creds_json = None
+            if isinstance(creds_raw, str):
+                try:
+                    decoded_bytes = base64.b64decode(creds_raw.strip())
+                    creds_json = json.loads(decoded_bytes.decode("utf-8"))
+                except Exception:
+                    try:
+                        creds_json = json.loads(creds_raw)
+                    except Exception:
+                        pass
+            if not creds_json:
+                if hasattr(creds_raw, "to_dict"):
+                    creds_json = creds_raw.to_dict()
+                elif isinstance(creds_raw, dict):
+                    creds_json = dict(creds_raw)
+            if not creds_json:
+                return None
+            if "private_key" in creds_json:
+                pk = str(creds_json["private_key"]).strip('"\'').replace("\\n", "\n")
+                creds_json["private_key"] = pk
+            creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
+        return build("drive", "v3", credentials=creds)
+    except Exception as e:
+        print(f"Erro ao autenticar Google Drive: {e}")
+        return None
+
+
+def deletar_arquivo_do_drive(link_ou_id):
+    if not link_ou_id:
+        return False
+    try:
+        file_id = str(link_ou_id)
+        if "id=" in file_id:
+            file_id = file_id.split("id=")[1].split("&")[0]
+        elif "/d/" in file_id:
+            file_id = file_id.split("/d/")[1].split("/")[0]
+
+        service = obter_servico_drive()
+        if service:
+            service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+            return True
+    except Exception as e:
+        print(f"Erro ao deletar arquivo no Drive: {e}")
+    return False
+
+
+def obter_ou_criar_subpasta(service, parent_folder_id, nome_pasta):
+    query = f"'{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{nome_pasta}' and trashed=false"
+    resultados = service.files().list(q=query, spaces="drive", supportsAllDrives=True, includeItemsFromAllDrives=True, fields="files(id, name)").execute()
+    pastas = resultados.get("files", [])
+    if pastas:
+        return pastas[0]["id"]
+    else:
+        file_metadata = {
+            "name": nome_pasta,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_folder_id],
+        }
+        pasta_criada = service.files().create(body=file_metadata, fields="id", supportsAllDrives=True).execute()
+        return pasta_criada.get("id")
+
+
+def obter_ou_criar_caminho_pastas(service, root_id, caminho):
+    if isinstance(caminho, str):
+        partes = [p.strip() for p in caminho.replace("\\", "/").split("/") if p.strip()]
+    elif isinstance(caminho, list):
+        partes = caminho
+    else:
+        partes = [str(caminho)]
+
+    atual_id = root_id
+    for nome_pasta in partes:
+        atual_id = obter_ou_criar_subpasta(service, atual_id, nome_pasta)
+    return atual_id
+
+
+def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type="application/pdf", as_google_doc=False, nome_subpasta=None):
+    try:
+        service = obter_servico_drive()
+        if not service:
+            st.error("❌ Não foi possível conectar ao Google Drive.")
+            return None
+
+        if not nome_subpasta:
+            data_hoje = datetime.datetime.now().strftime("%d-%m-%Y")
+            nome_subpasta = ["Relatórios IA", "Backup", data_hoje]
+
+        pasta_destino_id = obter_ou_criar_caminho_pastas(service, GOOGLE_DRIVE_FOLDER_ID, nome_subpasta)
+        file_metadata = {"name": nome_arquivo, "parents": [pasta_destino_id]}
+
+        if as_google_doc:
+            file_metadata["mimeType"] = "application/vnd.google-apps.document"
+
+        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
+        file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink", supportsAllDrives=True).execute()
+        return file.get("webViewLink")
+    except Exception as e:
+        st.error(f"❌ Erro ao salvar no Google Drive: {e}")
+        return None
 
 
 def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_referencia="2026"):
@@ -299,7 +344,6 @@ def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_refere
     resumo_mensal = {m: {"media": 0.0, "meta": 0.0, "gasto": 0.0, "economia": 0.0} for m in range(1, 13)}
     meses_fechados = set()
 
-    # A. Busca meses já arquivados no Supabase
     if supabase:
         try:
             res_f = supabase.table("fechamento_mensal").select("*").eq("ano", str(ano_referencia)).execute().data
@@ -314,7 +358,6 @@ def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_refere
         except Exception as e_fech:
             st.sidebar.error(f"Erro ao carregar fechamento_mensal: {e_fech}")
 
-    # B. Soma TODOS os itens ativos no Supabase apenas para os meses NÃO fechados
     for item in resp_cot_hist:
         dt_c = item.get("data_cotacao") or ""
         try:
@@ -401,7 +444,6 @@ def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_refere
     elements.append(t_resumo)
     elements.append(Spacer(1, 12))
 
-    # --- DETALHAMENTO DAS COTAÇÕES ATIVAS (FILTRADAS PELO MÊS SELECIONADO) ---
     cotacoes_filtradas_mes = []
     for item in resp_cot_hist:
         dt_c = item.get("data_cotacao") or ""
@@ -667,100 +709,6 @@ def gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas
     return buffer.getvalue()
 
 
-# --- MANIPULAÇÃO E ESTRUTURAÇÃO DE PASTAS NO GOOGLE DRIVE ---
-def obter_ou_criar_subpasta(service, parent_folder_id, nome_pasta):
-    query = f"'{parent_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{nome_pasta}' and trashed=false"
-    resultados = service.files().list(q=query, spaces="drive", supportsAllDrives=True, includeItemsFromAllDrives=True, fields="files(id, name)").execute()
-    pastas = resultados.get("files", [])
-    if pastas:
-        return pastas[0]["id"]
-    else:
-        file_metadata = {
-            "name": nome_pasta,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_folder_id],
-        }
-        pasta_criada = service.files().create(body=file_metadata, fields="id", supportsAllDrives=True).execute()
-        return pasta_criada.get("id")
-
-
-def obter_ou_criar_caminho_pastas(service, root_id, caminho):
-    if isinstance(caminho, str):
-        partes = [p.strip() for p in caminho.replace("\\", "/").split("/") if p.strip()]
-    elif isinstance(caminho, list):
-        partes = caminho
-    else:
-        partes = [str(caminho)]
-
-    atual_id = root_id
-    for nome_pasta in partes:
-        atual_id = obter_ou_criar_subpasta(service, atual_id, nome_pasta)
-    return atual_id
-
-
-def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type="application/pdf", as_google_doc=False, nome_subpasta=None):
-    try:
-        if not GOOGLE_DRIVE_FOLDER_ID:
-            st.error("❌ A variável 'GOOGLE_DRIVE_FOLDER_ID' não foi configurada nos Secrets!")
-            return None
-
-        SCOPES = ["https://www.googleapis.com/auth/drive"]
-
-        if os.path.exists("credentials.json"):
-            creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
-        else:
-            creds_raw = get_secret("GOOGLE_DRIVE_CREDENTIALS")
-            if not creds_raw:
-                st.error("❌ Segredo 'GOOGLE_DRIVE_CREDENTIALS' não encontrado!")
-                return None
-
-            creds_json = None
-            if isinstance(creds_raw, str):
-                try:
-                    decoded_bytes = base64.b64decode(creds_raw.strip())
-                    creds_json = json.loads(decoded_bytes.decode("utf-8"))
-                except Exception:
-                    try:
-                        creds_json = json.loads(creds_raw)
-                    except Exception:
-                        pass
-
-            if not creds_json:
-                if hasattr(creds_raw, "to_dict"):
-                    creds_json = creds_raw.to_dict()
-                elif isinstance(creds_raw, dict):
-                    creds_json = dict(creds_raw)
-
-            if not creds_json:
-                st.error("❌ Formato de credenciais do Google Drive inválido!")
-                return None
-
-            if "private_key" in creds_json:
-                pk = str(creds_json["private_key"]).strip('"\'').replace("\\n", "\n")
-                creds_json["private_key"] = pk
-
-            creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
-
-        service = build("drive", "v3", credentials=creds)
-
-        if not nome_subpasta:
-            data_hoje = datetime.datetime.now().strftime("%d-%m-%Y")
-            nome_subpasta = ["Relatórios IA", "Backup", data_hoje]
-
-        pasta_destino_id = obter_ou_criar_caminho_pastas(service, GOOGLE_DRIVE_FOLDER_ID, nome_subpasta)
-        file_metadata = {"name": nome_arquivo, "parents": [pasta_destino_id]}
-
-        if as_google_doc:
-            file_metadata["mimeType"] = "application/vnd.google-apps.document"
-
-        media = MediaIoBaseUpload(io.BytesIO(file_bytes), mimetype=mime_type, resumable=True)
-        file = service.files().create(body=file_metadata, media_body=media, fields="id, webViewLink", supportsAllDrives=True).execute()
-        return file.get("webViewLink")
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar no Google Drive: {e}")
-        return None
-
-
 def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao=None, compativel=None, encapsulamento=None, custo_estimado=None, link_adicional=None, datasheet=None):
     if not EMAIL_REMETENTE or not EMAIL_SENHA_APP or not EMAIL_DESTINATARIO:
         return False
@@ -823,6 +771,20 @@ def calcular_frete_ia(origem, destino, tipo_trajeto, dias_por_trecho, is_viagem_
 
     if not loc1 or not loc2:
         return {"erro": "Uma ou ambas as cidades não foram encontradas no mapa."}
+
+    ipva = float(st.session_state.get("ipva", 10000.0))
+    seguro = float(st.session_state.get("seguro", 10000.0))
+    manut_anual = float(st.session_state.get("manut_anual", 10000.0))
+    dias_uteis = int(st.session_state.get("dias_uteis", 365))
+    valor_alimentacao_dia = float(st.session_state.get("valor_alimentacao_dia", 70.0))
+    valor_pernoite = float(st.session_state.get("valor_pernoite", 250.0))
+    consumo = float(st.session_state.get("consumo", 8.0))
+    preco_diesel = float(st.session_state.get("preco_diesel", 8.00))
+    diaria_motorista = float(st.session_state.get("diaria_motorista", 200.0))
+    fator_estrada = float(st.session_state.get("fator_estrada", 0.25))
+    margem = float(st.session_state.get("margem", 20.0))
+
+    custo_fixo_diaria = (ipva + seguro + manut_anual) / dias_uteis
 
     multiplicador = 2 if tipo_trajeto == "Apenas Ida" else 4
     dist_direta = geodesic((loc1.latitude, loc1.longitude), (loc2.latitude, loc2.longitude)).km
@@ -944,7 +906,7 @@ tools = [
 ]
 
 # -----------------------------------------------------------------------------
-# 6. TELA DE AUTENTICAÇÃO E LOGIN (BLOQUEANTE)
+# 5. TELA DE AUTENTICAÇÃO E LOGIN (BLOQUEANTE)
 # -----------------------------------------------------------------------------
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -1012,51 +974,18 @@ if not st.session_state.autenticado:
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 7. BARRA LATERAL (EXIBIDA SOMENTE APÓS LOGIN)
+# 6. BARRA LATERAL MINIMALISTA
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.success(f"👤 **Logado como:**\n\n{st.session_state.solicitante_str}")
-    if st.button("🚪 Trocar Usuário / Sair", key="btn_sb_logout"):
+    st.caption("👤 PERFIL ATIVO")
+    st.markdown(f"**{st.session_state.solicitante_str}**")
+
+    if st.button("🚪 Sair da Sessão", key="btn_sb_logout"):
         st.session_state.clear()
         st.rerun()
 
-    st.divider()
-    st.header("🔑 Acesso Restrito")
-
-    if st.session_state.is_estoque:
-        st.info("🔓 **Modo Estoque Ativo**")
-        if st.button("🔄 Sair do Modo Estoque", key="btn_sb_sair_est"):
-            st.session_state.clear()
-            st.rerun()
-
-    elif st.session_state.is_adm:
-        st.info("🔓 **Modo Administrador Ativo**")
-        if st.button("🔄 Sair do Modo ADM", key="btn_sb_sair_adm"):
-            st.session_state.clear()
-            st.rerun()
-
-        st.divider()
-        st.header("⚙️ Configurações Fixas")
-
-        with st.expander("💰 Custos Fixos Veículo", expanded=False):
-            ipva = st.number_input("IPVA Anual (R$)", value=10000.0)
-            seguro = st.number_input("Seguro Anual (R$)", value=10000.0)
-            manut_anual = st.number_input("Manutenção Fixa Anual (R$)", value=10000.0)
-            dias_uteis = st.number_input("Dias Úteis/Ano", value=365)
-
-        with st.expander("🍴 Custos Unitários", expanded=False):
-            valor_alimentacao_dia = st.number_input("Alimentação/Dia (R$)", value=70.0)
-            valor_pernoite = st.number_input("Hospedagem/Noite (R$)", value=250.0)
-
-        with st.expander("⛽ Operação e Lucro", expanded=False):
-            consumo = st.number_input("Consumo (km/L)", value=8.0)
-            preco_diesel = st.number_input("Preço Diesel (R$)", value=8.00)
-            diaria_motorista = st.number_input("Salário Motorista (R$)", value=200.0)
-            fator_estrada = st.slider("Ajuste de Curvas (%)", 10, 40, 25) / 100
-            margem = st.slider("Margem de Lucro (%)", 0, 100, 20)
-
 # -----------------------------------------------------------------------------
-# 8. INTERFACE PRINCIPAL
+# 7. INTERFACE PRINCIPAL
 # -----------------------------------------------------------------------------
 st.markdown(
     """
@@ -1165,19 +1094,20 @@ if aba_estoque:
 
                         botoes_docs = ""
                         if link_cotacao:
-                            botoes_docs += f'<a href="{link_cotacao}" target="_blank" style="background: #f0fdf4; color: #15803d; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bbf7d0; margin-right: 8px;">📊 Abrir Cotação ↗</a>'
+                            botoes_docs += f'<a href="{link_cotacao}" target="_blank" style="background: #f0fdf4; color: #15803d; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 0.8rem; border: 1px solid #bbf7d0; margin-right: 6px;">📊 Cotação ↗</a>'
                         if link_nf:
-                            botoes_docs += f'<a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 8px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.85rem; display: inline-block; border: 1px solid #bfdbfe;">📄 Abrir Nota Fiscal ↗</a>'
-                        if not botoes_docs:
-                            botoes_docs = '<span style="color: #64748b; font-size: 0.85rem; font-weight: 500;">⏳ Documentos pendentes pelo ADM</span>'
+                            botoes_docs += f'<a href="{link_nf}" target="_blank" style="background: #eff6ff; color: #1d4ed8; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 0.8rem; border: 1px solid #bfdbfe;">📄 Nota Fiscal ↗</a>'
 
                         card_html = (
-                            f'<div style="background: #ffffff; padding: 18px; border-radius: 12px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left: 6px solid #3b82f6; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">'
-                            f'<h4 style="margin: 0 0 8px 0; color: #0f172a; font-size: 1.1rem;">📦 {desc}</h4>'
-                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🏷️ Nº Pedido:</b> <span style="color:#0f172a; font-weight:600;">{num_pedido}</span> | <b>🏢 Fornecedor:</b> {fornecedor}</p>'
-                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem; color: #475569;"><b>🔢 Qtd:</b> {qtd} un. | <b>📋 Ref:</b> {ref} | <b>📅 Data Prometida:</b> <span style="color:#2563eb; font-weight:600;">{dt_prometida}</span></p>'
-                            f'<p style="margin: 0 0 12px 0; font-size: 0.9rem; color: #475569;"><b>👤 Solicitante:</b> {solic} | <b>📌 Status:</b> {status_atual}</p>'
-                            f'{botoes_docs}'
+                            f'<div style="background: #ffffff; padding: 14px 16px; border-radius: 8px; margin-bottom: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6;">'
+                            f'<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">'
+                            f'<span style="font-weight: 600; font-size: 0.95rem; color: #0f172a;">📦 {desc} <span style="font-size: 0.85rem; color: #64748b; font-weight: 400;">({qtd} un.)</span></span>'
+                            f'<span style="background: #2563eb; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">{status_atual}</span>'
+                            f'</div>'
+                            f'<div style="font-size: 0.825rem; color: #475569; margin-bottom: 6px;">'
+                            f'<b>Solicitante:</b> {solic} &nbsp;|&nbsp; <b>PC:</b> {num_pedido} &nbsp;|&nbsp; <b>Forn:</b> {fornecedor} &nbsp;|&nbsp; <b>Prometido:</b> {dt_prometida}'
+                            f'</div>'
+                            f'<div>{botoes_docs}</div>'
                             f'</div>'
                         )
 
@@ -1187,7 +1117,7 @@ if aba_estoque:
                             with st.form(f"form_fin_est_{item_id}"):
                                 col_e1, col_e2 = st.columns(2)
                                 with col_e1:
-                                    f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today(), key=f"dt_ent_{item_id}")
+                                    f_dt_entregue = st.date_input("Data Real de Entrega:", value=datetime.date.today(), format="DD/MM/YYYY", key=f"dt_ent_{item_id}")
                                 with col_e2:
                                     f_qualidade = st.selectbox("Qualidade OK (Sem defeitos/avarias)?", ["SIM", "NÃO"], key=f"qual_{item_id}")
 
@@ -1423,8 +1353,6 @@ Seja cortês, profissional e objetivo.
 # =============================================================================
 if aba_gestao:
     with aba_gestao:
-        st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
-
         if supabase:
             st.markdown("#### 📊 Relatórios de Controle de Compras")
             col_mes, col_ano, col_btn_rel = st.columns([1, 1, 2])
@@ -1432,7 +1360,7 @@ if aba_gestao:
                 mes_filtro = st.selectbox("Mês:", ["Todos", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=datetime.datetime.now().month)
             with col_ano:
                 ano_filtro = st.selectbox("Ano:", ["Todos", "2025", "2026", "2027", "2028"], index=2)
-            
+
             with col_btn_rel:
                 st.write("")
                 btn_relatorio = st.button("📄 Gerar Relatório (PDF)", use_container_width=True)
@@ -1460,12 +1388,10 @@ if aba_gestao:
                                 p_id = c.get("pedido_id")
                                 is_comprado = (p_id is None or str(p_id) in ids_comprados)
 
-                                # Cotações do ano para compor a tabela superior
                                 if ano_filtro == "Todos" or dt_cotacao.startswith(ano_filtro):
                                     if is_comprado:
                                         resp_cot_hist_ano_todo.append(c)
 
-                                # Filtra por mês para a tabela de detalhamento abaixo
                                 if ano_filtro != "Todos" and not dt_cotacao.startswith(ano_filtro):
                                     continue
                                 if mes_filtro != "Todos" and f"-{mes_filtro}-" not in dt_cotacao:
@@ -1479,7 +1405,7 @@ if aba_gestao:
                             mes_referencia=mes_filtro,
                             ano_referencia=ano_filtro,
                         )
-                        
+
                         rotulo_periodo = f"{mes_filtro}-{ano_filtro}" if mes_filtro != "Todos" else f"Geral_{ano_filtro}"
                         nome_planilha = f"Controle_Compras_{rotulo_periodo}.pdf"
 
@@ -1604,7 +1530,7 @@ if aba_gestao:
                     ]
 
                 if not dados_compras:
-                    st.info(f"Nenhuma solicitação encontrada para o status **'{filtro_status}'** e filial **'{filtro_filial}'**.")
+                    st.info(f"Nenhuma solicitação encontrada para os filtros selecionados.")
                 else:
                     st.markdown(f"Exibindo **{len(dados_compras)}** solicitação(ões):")
 
@@ -1622,10 +1548,6 @@ if aba_gestao:
                         created_at = item.get("created_at")
                         data_finalizacao = item.get("data_finalizacao")
 
-                        id_manut = item.get("id_manutencao")
-                        compat = item.get("compativel")
-                        encaps = item.get("encapsulamento")
-                        custo_est = item.get("custo_estimado")
                         num_pedido = item.get("numero_pedido")
                         fornecedor = item.get("fornecedor_vencedor")
                         data_prometida = item.get("data_prometida")
@@ -1642,244 +1564,268 @@ if aba_gestao:
                             cor_borda = "#ef4444"
 
                         tempo_str = formatar_tempo_decorrido(created_at, data_finalizacao)
-                        rotulo_tempo = "🏁 Tempo Total:" if data_finalizacao else "⏳ Em aberto há:"
 
-                        campos_extra_adm = ""
-                        if num_pedido or fornecedor or data_prometida:
-                            campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🏷️ Nº Pedido:</b> {num_pedido or "N/A"} | <b>🏢 Fornecedor:</b> {fornecedor or "N/A"} | <b>📅 Prometido para:</b> {data_prometida or "N/A"}</p>'
-                        if id_manut or compat or encaps or custo_est:
-                            campos_extra_adm += f'<p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #475569;"><b>🛠️ ID Manut:</b> {id_manut or "N/A"} | <b>🧩 Compatível:</b> {compat or "N/A"} | <b>📦 Encaps:</b> {encaps or "N/A"} | <b>💰 Custo Est:</b> {custo_est or "N/A"}</p>'
+                        links_list = []
+                        if link and link != "#":
+                            links_list.append(f'<a href="{link}" target="_blank" style="color: #2563eb; text-decoration: none; font-weight: 500;">🔗 Produto</a>')
+                        if link_cotacao:
+                            links_list.append(f'<a href="{link_cotacao}" target="_blank" style="color: #16a34a; text-decoration: none; font-weight: 500;">📊 Cotação Drive</a>')
+                        if link_nf:
+                            links_list.append(f'<a href="{link_nf}" target="_blank" style="color: #2563eb; text-decoration: none; font-weight: 500;">📄 NF Drive</a>')
 
-                        card_html = (
-                            f'<div style="border-left: 5px solid {cor_borda}; background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 12px; border: 1px solid #e2e8f0; border-left-width: 5px;">'
-                            f'<div style="display: flex; justify-content: space-between; align-items: center;">'
-                            f'<h4 style="margin: 0; color: #0f172a;">📦 {desc}</h4>'
-                            f'<span style="background: {cor_borda}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold;">{status_atual}</span>'
-                            f'</div>'
-                            f'<p style="margin: 8px 0 4px 0; font-size: 0.9rem;"><b>👤 Solicitante:</b> {solic}</p>'
-                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🔢 Quantidade:</b> {qtd} un. | <b>📋 Ref:</b> {ref}</p>'
-                            f'<p style="margin: 0 0 4px 0; font-size: 0.9rem;"><b>🎯 Motivo:</b> {motivo}</p>'
-                            f'{campos_extra_adm}'
-                            f'<p style="margin: 4px 0 4px 0; font-size: 0.9rem; color: #1e293b;"><b>{rotulo_tempo}</b> <span style="background: #e2e8f0; padding: 2px 8px; border-radius: 6px; font-weight: 600;">{tempo_str}</span></p>'
-                            f'<p style="margin: 0; font-size: 0.9rem;">🔗 <a href="{link}" target="_blank">Ver Link do Produto</a></p>'
-                            f'</div>'
-                        )
+                        docs_inline = " &nbsp;•&nbsp; ".join(links_list) if links_list else "<span style='color:#94a3b8;'>Sem anexos</span>"
+
+                        detalhes_ped = []
+                        if num_pedido: detalhes_ped.append(f"<b>PC:</b> {num_pedido}")
+                        if fornecedor: detalhes_ped.append(f"<b>Forn:</b> {fornecedor}")
+                        if data_prometida: detalhes_ped.append(f"<b>Entrega:</b> {data_prometida}")
+                        detalhes_ped.append(f"<b>Tempo:</b> {tempo_str}")
+                        linha_ped = " &nbsp;|&nbsp; ".join(detalhes_ped)
+
+                        card_html = f"""
+                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid {cor_borda}; padding: 10px 14px; border-radius: 8px; margin-bottom: 6px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                                <span style="font-weight: 600; font-size: 0.925rem; color: #0f172a;">📦 {desc} <span style="font-weight: 400; color: #64748b; font-size: 0.825rem;">({qtd} un.)</span></span>
+                                <span style="background: {cor_borda}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">{status_atual}</span>
+                            </div>
+                            <div style="font-size: 0.8rem; color: #475569; margin-bottom: 4px;">
+                                <b>Solicitante:</b> {solic} &nbsp;|&nbsp; <b>Ref:</b> {ref} &nbsp;|&nbsp; <b>Motivo:</b> {motivo}
+                            </div>
+                            <div style="font-size: 0.775rem; color: #64748b; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 4px 8px; border-radius: 4px;">
+                                <div>{linha_ped}</div>
+                                <div>{docs_inline}</div>
+                            </div>
+                        </div>
+                        """
 
                         with st.container():
                             st.markdown(card_html, unsafe_allow_html=True)
 
-                            if link_cotacao:
-                                st.info("📊 **Cotação Anexada!**")
-                                col_c_link1, col_c_link2 = st.columns([3, 1])
-                                with col_c_link1:
-                                    st.markdown(f"🔗 [Clique aqui para abrir a Cotação no Google Drive]({link_cotacao})")
-                                with col_c_link2:
-                                    if st.button("🗑️ Remover Cotação", key=f"btn_del_cot_{item_id}"):
-                                        supabase.table("solicitacoes_compras").update({"link_cotacao": None}).eq("id", item_id).execute()
-                                        st.success("Cotação removida deste pedido!")
-                                        st.rerun()
-
-                            if link_nf:
-                                st.success("📄 **Nota Fiscal Anexada!**")
-                                st.markdown(f"🔗 [Clique aqui para abrir a NF no Google Drive]({link_nf})")
-
                             if status_atual in ["Pendente", "Aguardando NF", "Aguardando entrega"]:
-                                with st.expander("📊 Gerar Cotação Comparativa (Mínimo 3 Fornecedores)"):
-                                    with st.form(f"form_gerar_cot_{item_id}"):
-                                        st.markdown("##### 🏢 Opção 1 (Fornecedor 1)")
-                                        col_c1, col_c2, col_c3 = st.columns(3)
-                                        with col_c1:
-                                            forn1_nome = st.text_input("Nome Fornecedor 1:", key=f"f1_n_{item_id}")
-                                        with col_c2:
-                                            forn1_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_p_{item_id}")
-                                        with col_c3:
-                                            forn1_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f1_f_{item_id}")
-                                        forn1_link = st.text_input("🔗 Link da Cotação / Produto 1 (Opcional):", key=f"f1_l_{item_id}")
+                                col_exp1, col_exp2 = st.columns(2)
+                                with col_exp1:
+                                    with st.expander("📊 Gerar / Gerenciar Cotação"):
+                                        with st.form(f"form_gerar_cot_{item_id}"):
+                                            default_link_1 = link if (link and link != "#") else ""
+                                            default_nome_1 = extrair_nome_fornecedor(default_link_1)
 
-                                        st.markdown("##### 🏢 Opção 2 (Fornecedor 2)")
-                                        col_c4, col_c5, col_c6 = st.columns(3)
-                                        with col_c4:
-                                            forn2_nome = st.text_input("Nome Fornecedor 2:", key=f"f2_n_{item_id}")
-                                        with col_c5:
-                                            forn2_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_p_{item_id}")
-                                        with col_c6:
-                                            forn2_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f2_f_{item_id}")
-                                        forn2_link = st.text_input("🔗 Link da Cotação / Produto 2 (Opcional):", key=f"f2_l_{item_id}")
+                                            st.caption("🏢 Fornecedor 1")
+                                            c_f1_1, c_f1_2, c_f1_3 = st.columns([2, 1, 1])
+                                            forn1_nome = c_f1_1.text_input("Nome 1", value=default_nome_1, key=f"f1_n_{item_id}", placeholder="Nome 1", label_visibility="collapsed")
+                                            forn1_preco_str = c_f1_2.text_input("Preço 1", key=f"f1_p_{item_id}", placeholder="Preço (15,90)", label_visibility="collapsed")
+                                            forn1_frete_str = c_f1_3.text_input("Frete 1", key=f"f1_f_{item_id}", placeholder="Frete (0,00)", label_visibility="collapsed")
+                                            forn1_link = st.text_input("Link 1", value=default_link_1, key=f"f1_l_{item_id}", placeholder="🔗 Link Cotação 1", label_visibility="collapsed")
 
-                                        st.markdown("##### 🏢 Opção 3 (Fornecedor 3)")
-                                        col_c7, col_c8, col_c9 = st.columns(3)
-                                        with col_c7:
-                                            forn3_nome = st.text_input("Nome Fornecedor 3:", key=f"f3_n_{item_id}")
-                                        with col_c8:
-                                            forn3_preco = st.number_input("Preço Unit. (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_p_{item_id}")
-                                        with col_c9:
-                                            forn3_frete = st.number_input("Frete (R$):", min_value=0.0, value=0.0, step=0.01, key=f"f3_f_{item_id}")
-                                        forn3_link = st.text_input("🔗 Link da Cotação / Produto 3 (Opcional):", key=f"f3_l_{item_id}")
+                                            st.caption("🏢 Fornecedor 2")
+                                            c_f2_1, c_f2_2, c_f2_3 = st.columns([2, 1, 1])
+                                            forn2_nome = c_f2_1.text_input("Nome 2", key=f"f2_n_{item_id}", placeholder="Nome 2", label_visibility="collapsed")
+                                            forn2_preco_str = c_f2_2.text_input("Preço 2", key=f"f2_p_{item_id}", placeholder="Preço (15,90)", label_visibility="collapsed")
+                                            forn2_frete_str = c_f2_3.text_input("Frete 2", key=f"f2_f_{item_id}", placeholder="Frete (0,00)", label_visibility="collapsed")
+                                            forn2_link = st.text_input("Link 2", key=f"f2_l_{item_id}", placeholder="🔗 Link Cotação 2", label_visibility="collapsed")
 
-                                        btn_gerar_cot = st.form_submit_button("⚙️ Gerar Documento de Cotação em PDF & Salvar")
+                                            st.caption("🏢 Fornecedor 3")
+                                            c_f3_1, c_f3_2, c_f3_3 = st.columns([2, 1, 1])
+                                            forn3_nome = c_f3_1.text_input("Nome 3", key=f"f3_n_{item_id}", placeholder="Nome 3", label_visibility="collapsed")
+                                            forn3_preco_str = c_f3_2.text_input("Preço 3", key=f"f3_p_{item_id}", placeholder="Preço (15,90)", label_visibility="collapsed")
+                                            forn3_frete_str = c_f3_3.text_input("Frete 3", key=f"f3_f_{item_id}", placeholder="Frete (0,00)", label_visibility="collapsed")
+                                            forn3_link = st.text_input("Link 3", key=f"f3_l_{item_id}", placeholder="🔗 Link Cotação 3", label_visibility="collapsed")
 
-                                        if btn_gerar_cot:
-                                            opcoes = []
-                                            if forn1_nome.strip() and forn1_preco > 0:
-                                                tot1 = (forn1_preco * qtd) + forn1_frete
-                                                opcoes.append({"nome": forn1_nome.strip(), "pu": forn1_preco, "frete": forn1_frete, "total": tot1, "link": forn1_link.strip()})
-                                            if forn2_nome.strip() and forn2_preco > 0:
-                                                tot2 = (forn2_preco * qtd) + forn2_frete
-                                                opcoes.append({"nome": forn2_nome.strip(), "pu": forn2_preco, "frete": forn2_frete, "total": tot2, "link": forn2_link.strip()})
-                                            if forn3_nome.strip() and forn3_preco > 0:
-                                                tot3 = (forn3_preco * qtd) + forn3_frete
-                                                opcoes.append({"nome": forn3_nome.strip(), "pu": forn3_preco, "frete": forn3_frete, "total": tot3, "link": forn3_link.strip()})
+                                            btn_gerar_cot = st.form_submit_button("⚙️ Salvar Cotação PDF", use_container_width=True)
 
-                                            if len(opcoes) < 3:
-                                                st.error("⚠️ É obrigatório cadastrar no mínimo 3 fornecedores com preços válidos para gerar a cotação comparativa!")
-                                            else:
-                                                opcoes_ordenadas = sorted(opcoes, key=lambda x: x["total"])
-                                                vencedor = opcoes_ordenadas[0]
+                                            if btn_gerar_cot:
+                                                forn1_preco = converter_valor_float(forn1_preco_str)
+                                                forn1_frete = converter_valor_float(forn1_frete_str)
+                                                forn2_preco = converter_valor_float(forn2_preco_str)
+                                                forn2_frete = converter_valor_float(forn2_frete_str)
+                                                forn3_preco = converter_valor_float(forn3_preco_str)
+                                                forn3_frete = converter_valor_float(forn3_frete_str)
 
-                                                tot1_val = opcoes_ordenadas[0]["total"]
-                                                tot2_val = opcoes_ordenadas[1]["total"]
-                                                tot3_val = opcoes_ordenadas[2]["total"]
+                                                if forn1_link.strip():
+                                                    ext1 = extrair_nome_fornecedor(forn1_link)
+                                                    if not forn1_nome.strip() or forn1_nome.strip() == "Nome 1":
+                                                        forn1_nome = ext1 or forn1_nome
 
-                                                media_orcam = (tot1_val + tot2_val + tot3_val) / 3.0
-                                                preco_alvo = media_orcam * 0.90
-                                                valor_comprado = vencedor["total"]
-                                                economia_real = media_orcam - valor_comprado
-                                                status_meta_txt = "Atingida" if valor_comprado <= preco_alvo else "Não Atingida"
+                                                if forn2_link.strip():
+                                                    ext2 = extrair_nome_fornecedor(forn2_link)
+                                                    if not forn2_nome.strip() or forn2_nome.strip() == "Nome 2":
+                                                        forn2_nome = ext2 or forn2_nome
 
+                                                if forn3_link.strip():
+                                                    ext3 = extrair_nome_fornecedor(forn3_link)
+                                                    if not forn3_nome.strip() or forn3_nome.strip() == "Nome 3":
+                                                        forn3_nome = ext3 or forn3_nome
+
+                                                opcoes = []
+                                                if forn1_nome.strip() and forn1_preco > 0:
+                                                    tot1 = (forn1_preco * qtd) + forn1_frete
+                                                    opcoes.append({"nome": forn1_nome.strip(), "pu": forn1_preco, "frete": forn1_frete, "total": tot1, "link": forn1_link.strip()})
+                                                if forn2_nome.strip() and forn2_preco > 0:
+                                                    tot2 = (forn2_preco * qtd) + forn2_frete
+                                                    opcoes.append({"nome": forn2_nome.strip(), "pu": forn2_preco, "frete": forn2_frete, "total": tot2, "link": forn2_link.strip()})
+                                                if forn3_nome.strip() and forn3_preco > 0:
+                                                    tot3 = (forn3_preco * qtd) + forn3_frete
+                                                    opcoes.append({"nome": forn3_nome.strip(), "pu": forn3_preco, "frete": forn3_frete, "total": tot3, "link": forn3_link.strip()})
+
+                                                if len(opcoes) < 3:
+                                                    st.error("⚠️ Cadastre 3 fornecedores válidos!")
+                                                else:
+                                                    if link_cotacao:
+                                                        deletar_arquivo_do_drive(link_cotacao)
+
+                                                    if supabase:
+                                                        try:
+                                                            supabase.table("cotacoes").delete().eq("pedido_id", int(item_id)).execute()
+                                                        except Exception:
+                                                            pass
+
+                                                    opcoes_ordenadas = sorted(opcoes, key=lambda x: x["total"])
+                                                    vencedor = opcoes_ordenadas[0]
+
+                                                    tot1_val = opcoes_ordenadas[0]["total"]
+                                                    tot2_val = opcoes_ordenadas[1]["total"]
+                                                    tot3_val = opcoes_ordenadas[2]["total"]
+
+                                                    media_orcam = (tot1_val + tot2_val + tot3_val) / 3.0
+                                                    preco_alvo = media_orcam * 0.90
+                                                    valor_comprado = vencedor["total"]
+                                                    economia_real = media_orcam - valor_comprado
+                                                    status_meta_txt = "Atingida" if valor_comprado <= preco_alvo else "Não Atingida"
+
+                                                    if supabase:
+                                                        try:
+                                                            supabase.table("cotacoes").insert({
+                                                                "data_cotacao": datetime.date.today().isoformat(),
+                                                                "produto": desc,
+                                                                "fornecedor_a": f"{opcoes_ordenadas[0]['nome']} (R$ {formar_real(tot1_val)})",
+                                                                "valor_a": float(tot1_val),
+                                                                "fornecedor_b": f"{opcoes_ordenadas[1]['nome']} (R$ {formar_real(tot2_val)})",
+                                                                "valor_b": float(tot2_val),
+                                                                "fornecedor_c": f"{opcoes_ordenadas[2 if len(opcoes_ordenadas)>2 else 1]['nome']} (R$ {formar_real(tot3_val)})",
+                                                                "valor_c": float(tot3_val),
+                                                                "media_orcam": float(media_orcam),
+                                                                "preco_alvo": float(preco_alvo),
+                                                                "valor_comprado": float(valor_comprado),
+                                                                "economia_real": float(economia_real),
+                                                                "status_meta": status_meta_txt,
+                                                                "solicitante": solic,
+                                                                "pedido_id": int(item_id),
+                                                            }).execute()
+                                                        except Exception:
+                                                            pass
+
+                                                    pdf_ind_bytes = gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas, vencedor)
+                                                    desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                                    nome_arq_ind = f"Cotacao_Sistema_{item_id}_{desc_limpa}.pdf"
+                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                    dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+
+                                                    link_cot_gerada = salvar_nf_no_drive(
+                                                        pdf_ind_bytes,
+                                                        nome_arq_ind,
+                                                        mime_type="application/pdf",
+                                                        as_google_doc=False,
+                                                        nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
+                                                    )
+
+                                                    if link_cot_gerada:
+                                                        supabase.table("solicitacoes_compras").update({
+                                                            "link_cotacao": link_cot_gerada,
+                                                            "fornecedor_vencedor": vencedor["nome"],
+                                                        }).eq("id", item_id).execute()
+                                                        st.success(f"✅ Cotação salva! Vencedor: {vencedor['nome']}")
+                                                        st.rerun()
+
+                                        if link_cotacao:
+                                            if st.button("🗑️ Excluir Cotação do Drive/Sistema", key=f"btn_excluir_cot_{item_id}", use_container_width=True):
+                                                deletar_arquivo_do_drive(link_cotacao)
                                                 if supabase:
                                                     try:
-                                                        supabase.table("cotacoes").insert({
-                                                            "data_cotacao": datetime.date.today().isoformat(),
-                                                            "produto": desc,
-                                                            "fornecedor_a": f"{opcoes_ordenadas[0]['nome']} (R$ {formar_real(tot1_val)})",
-                                                            "valor_a": float(tot1_val),
-                                                            "fornecedor_b": f"{opcoes_ordenadas[1]['nome']} (R$ {formar_real(tot2_val)})",
-                                                            "valor_b": float(tot2_val),
-                                                            "fornecedor_c": f"{opcoes_ordenadas[2]['nome']} (R$ {formar_real(tot3_val)})",
-                                                            "valor_c": float(tot3_val),
-                                                            "media_orcam": float(media_orcam),
-                                                            "preco_alvo": float(preco_alvo),
-                                                            "valor_comprado": float(valor_comprado),
-                                                            "economia_real": float(economia_real),
-                                                            "status_meta": status_meta_txt,
-                                                            "solicitante": solic,
-                                                            "pedido_id": int(item_id),
-                                                        }).execute()
-                                                    except Exception as e_cot:
-                                                        st.error(f"⚠️ Erro ao gravar no Supabase: {e_cot}")
+                                                        supabase.table("cotacoes").delete().eq("pedido_id", int(item_id)).execute()
+                                                        supabase.table("solicitacoes_compras").update({
+                                                            "link_cotacao": None,
+                                                            "fornecedor_vencedor": None
+                                                        }).eq("id", item_id).execute()
+                                                    except Exception:
+                                                        pass
+                                                st.success("✅ Cotação excluída!")
+                                                st.rerun()
 
-                                                pdf_ind_bytes = gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas, vencedor)
-                                                desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-                                                nome_arq_ind = f"Cotacao_Sistema_{item_id}_{desc_limpa}.pdf"
-
-                                                mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
-
-                                                link_cot_gerada = salvar_nf_no_drive(
-                                                    pdf_ind_bytes,
-                                                    nome_arq_ind,
-                                                    mime_type="application/pdf",
-                                                    as_google_doc=False,
-                                                    nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
-                                                )
-
-                                                if link_cot_gerada:
-                                                    supabase.table("solicitacoes_compras").update({
-                                                        "link_cotacao": link_cot_gerada,
-                                                        "fornecedor_vencedor": vencedor["nome"],
-                                                    }).eq("id", item_id).execute()
-                                                    st.success(f"✅ Cotação Vital C salva em PDF! Vencedor: {vencedor['nome']} (R$ {formar_real(vencedor['total'])})")
-                                                    st.rerun()
-
-                                with st.expander("📝 Cadastrar / Atualizar Dados da Compra e NF"):
-                                    with st.form(f"form_upload_nf_{item_id}"):
-                                        col_a1, col_a2 = st.columns(2)
-                                        with col_a1:
-                                            num_pedido_input = st.text_input("Número do Pedido de Compra (Obrigatório):", value=num_pedido or "", key=f"input_ped_{item_id}")
-                                            f_fornec_input = st.text_input("Fornecedor Vencedor (Obrigatório):", value=fornecedor or "", key=f"input_forn_{item_id}")
-                                        with col_a2:
+                                with col_exp2:
+                                    with st.expander("📝 Dados da Compra & Anexo NF"):
+                                        with st.form(f"form_upload_nf_{item_id}"):
+                                            num_pedido_input = st.text_input("Nº Pedido:", value=num_pedido or "", key=f"input_ped_{item_id}")
+                                            
+                                            default_fornec = fornecedor or extrair_nome_fornecedor(link)
+                                            f_fornec_input = st.text_input("Fornecedor Vencedor:", value=default_fornec, key=f"input_forn_{item_id}")
+                                            
                                             val_dt_prom = datetime.date.today()
                                             if data_prometida:
-                                                try:
-                                                    val_dt_prom = datetime.datetime.strptime(str(data_prometida), "%Y-%m-%d").date()
-                                                except Exception:
-                                                    pass
-                                            f_dt_prometida_input = st.date_input("Data Estimada / Prometida de Entrega:", value=val_dt_prom, key=f"input_dtp_{item_id}")
-                                            f_paz_pg_input = st.number_input("Prazo de Pagamento (Dias):", min_value=0, value=30, key=f"input_ppg_{item_id}")
+                                                try: val_dt_prom = datetime.datetime.strptime(str(data_prometida), "%Y-%m-%d").date()
+                                                except Exception: pass
+                                            
+                                            f_dt_prometida_input = st.date_input("Prometido para:", value=val_dt_prom, format="DD/MM/YYYY", key=f"input_dtp_{item_id}")
+                                            
+                                            uploaded_cot_ext = st.file_uploader("PDF Cotação / Orçamento Externa:", type=["pdf"], key=f"file_cot_ext_{item_id}")
+                                            uploaded_nf = st.file_uploader("PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
+                                            
+                                            btn_save_nf_adm = st.form_submit_button("💾 Salvar Compra", use_container_width=True)
 
-                                        uploaded_cot = st.file_uploader("Anexar PDF da Cotação Externa (Opcional):", type=["pdf"], key=f"file_cot_{item_id}")
-                                        uploaded_nf = st.file_uploader("Anexar PDF da NF (Opcional - pode anexar depois):", type=["pdf"], key=f"file_nf_{item_id}")
-                                        btn_save_nf_adm = st.form_submit_button("💾 Salvar Dados da Compra e Anexos")
+                                            if btn_save_nf_adm:
+                                                if not num_pedido_input.strip() or not f_fornec_input.strip():
+                                                    st.error("⚠️ Preencha Nº do Pedido e Fornecedor!")
+                                                else:
+                                                    update_payload = {
+                                                        "status": "Aguardando entrega",
+                                                        "numero_pedido": num_pedido_input.strip(),
+                                                        "fornecedor_vencedor": f_fornec_input.strip(),
+                                                        "data_prometida": f_dt_prometida_input.isoformat(),
+                                                    }
+                                                    
+                                                    desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                    dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
 
-                                        if btn_save_nf_adm:
-                                            if not num_pedido_input.strip():
-                                                st.error("⚠️ Por favor, preencha o Número do Pedido de Compra!")
-                                            elif not f_fornec_input.strip():
-                                                st.error("⚠️ Por favor, preencha o Fornecedor Vencedor!")
-                                            else:
-                                                update_payload = {
-                                                    "status": "Aguardando entrega",
-                                                    "numero_pedido": num_pedido_input.strip(),
-                                                    "fornecedor_vencedor": f_fornec_input.strip(),
-                                                    "data_prometida": f_dt_prometida_input.isoformat(),
-                                                    "prazo_pagamento_dias": f_paz_pg_input,
-                                                }
-
-                                                desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-
-                                                if uploaded_cot:
-                                                    with st.spinner("Enviando Cotação para o Google Drive..."):
-                                                        bytes_cot = uploaded_cot.read()
-                                                        nome_cot = f"Cotacao_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-
-                                                        mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                        dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
-
-                                                        link_cot_drive = salvar_nf_no_drive(
-                                                            bytes_cot,
-                                                            nome_cot,
-                                                            nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
-                                                        )
-
+                                                    if uploaded_cot_ext:
+                                                        if link_cotacao:
+                                                            deletar_arquivo_do_drive(link_cotacao)
+                                                        bytes_cot = uploaded_cot_ext.read()
+                                                        nome_cot = f"Cotacao_Externa_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                                        link_cot_drive = salvar_nf_no_drive(bytes_cot, nome_cot, nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot])
                                                         if link_cot_drive:
                                                             update_payload["link_cotacao"] = link_cot_drive
 
-                                                if uploaded_nf:
-                                                    with st.spinner("Enviando Nota Fiscal para o Google Drive..."):
+                                                    if uploaded_nf:
                                                         bytes_data = uploaded_nf.read()
                                                         nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                        mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                        link_drive = salvar_nf_no_drive(
-                                                            bytes_data,
-                                                            nome_arquivo,
-                                                            nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano],
-                                                        )
+                                                        link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo, nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano])
                                                         if link_drive:
                                                             update_payload["link_nf"] = link_drive
 
-                                                supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
-                                                st.success("Dados da compra e documentos salvos com sucesso!")
-                                                st.rerun()
+                                                    supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
+                                                    st.success("✅ Compra e anexos salvos!")
+                                                    st.rerun()
 
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            if st.button("🚚 Aguardando entrega", key=f"entreg_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Aguardando entrega"}).eq("id", item_id).execute()
-                                st.rerun()
-                        with col2:
-                            if st.button("📄 Aguardando NF", key=f"ped_nf_{item_id}"):
-                                supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
-                                st.rerun()
-                        with col3:
-                            if st.button("❌ Recusar", key=f"rec_{item_id}"):
-                                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                                supabase.table("solicitacoes_compras").update({
-                                    "status": "Recusado",
-                                    "data_finalizacao": now_iso,
-                                }).eq("id", item_id).execute()
-                                st.rerun()
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                if st.button("🚚 Ag. Entrega", key=f"entreg_{item_id}", use_container_width=True):
+                                    payload_up = {"status": "Aguardando entrega"}
+                                    if not fornecedor:
+                                        forn_auto = extrair_nome_fornecedor(link)
+                                        if forn_auto:
+                                            payload_up["fornecedor_vencedor"] = forn_auto
+                                    supabase.table("solicitacoes_compras").update(payload_up).eq("id", item_id).execute()
+                                    st.rerun()
+                            with col2:
+                                if st.button("📄 Ag. NF", key=f"ped_nf_{item_id}", use_container_width=True):
+                                    supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
+                                    st.rerun()
+                            with col3:
+                                if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
+                                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                    supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
+                                    st.rerun()
 
-                        st.divider()
+                        st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
 # =============================================================================
 # ABA 3: FERRAMENTAS E MÓDULOS EXTRAS (RESTRITO AO MODO ADM)
