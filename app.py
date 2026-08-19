@@ -1698,12 +1698,15 @@ if aba_gestao:
                                             desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
                                             nome_arq_ind = f"Cotacao_Sistema_{item_id}_{desc_limpa}.pdf"
 
+                                            mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                            dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+
                                             link_cot_gerada = salvar_nf_no_drive(
                                                 pdf_ind_bytes,
                                                 nome_arq_ind,
                                                 mime_type="application/pdf",
                                                 as_google_doc=False,
-                                                nome_subpasta=["Relatórios IA", "Cotações"],
+                                                nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
                                             )
 
                                             if link_cot_gerada:
@@ -1754,7 +1757,16 @@ if aba_gestao:
                                                 with st.spinner("Enviando Cotação para o Google Drive..."):
                                                     bytes_cot = uploaded_cot.read()
                                                     nome_cot = f"Cotacao_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                    link_cot_drive = salvar_nf_no_drive(bytes_cot, nome_cot, nome_subpasta=["Relatórios IA", "Cotações"])
+                                                    
+                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                    dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+                                                    
+                                                    link_cot_drive = salvar_nf_no_drive(
+                                                        bytes_cot, 
+                                                        nome_cot, 
+                                                        nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot]
+                                                    )
+                                                    
                                                     if link_cot_drive:
                                                         update_payload["link_cotacao"] = link_cot_drive
 
