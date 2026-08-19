@@ -263,176 +263,225 @@ def formar_real(valor):
         return "0,00"
 
 
-def gerar_pdf_controle_compras(resp_cot_hist):
+def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
+    if ano_referencia == "Todos":
+        ano_referencia = str(datetime.datetime.now().year)
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=landscape(A4),
         rightMargin=15,
         leftMargin=15,
-        topMargin=20,
-        bottomMargin=20,
+        topMargin=15,
+        bottomMargin=15,
     )
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "TitleStyle",
-        parent=styles["Heading1"],
-        fontSize=16,
-        leading=18,
-        alignment=1,
-        textColor=colors.HexColor("#0f172a"),
-        fontName="Helvetica-Bold",
+        "TitleStyle", fontSize=13, leading=15, alignment=1, textColor=colors.HexColor("#0f172a"), fontName="Helvetica-Bold"
     )
     subtitle_style = ParagraphStyle(
-        "SubTitleStyle",
-        parent=styles["Normal"],
-        fontSize=10,
-        leading=12,
-        alignment=1,
-        textColor=colors.HexColor("#475569"),
-        fontName="Helvetica-Bold",
+        "SubTitleStyle", fontSize=8, leading=10, alignment=1, textColor=colors.HexColor("#475569"), fontName="Helvetica-Bold"
     )
 
     elements = [
-        Paragraph("<b>CONTROLE DE COMPRAS 2026</b>", title_style),
-        Paragraph("VITAL C", subtitle_style),
-        Spacer(1, 12),
+        Paragraph(f"<b>STATUS GASTOS OU ECONOMIA - MENSAL/ANUAL ({ano_referencia})</b>", title_style),
+        Paragraph("VITAL C — PAINEL CONSOLIDADO DE COMPRAS E METAS", subtitle_style),
+        Spacer(1, 8),
     ]
 
-    header_style = ParagraphStyle(
-        "TH",
-        fontSize=8,
-        leading=10,
-        fontName="Helvetica-Bold",
-        textColor=colors.white,
-        alignment=1,
-    )
-    header_yellow_style = ParagraphStyle(
-        "THY",
-        fontSize=8,
-        leading=10,
-        fontName="Helvetica-Bold",
-        textColor=colors.HexColor("#0f172a"),
-        alignment=1,
-    )
-
-    def style_th(text, bg_color):
-        p_style = header_yellow_style if bg_color == "#eab308" else header_style
-        return Paragraph(f"<b>{text}</b>", p_style)
-
-    th_cells = [
-        style_th("Mês / Data", "#eab308"),
-        style_th("Produto", "#eab308"),
-        style_th("Fornecedor A", "#eab308"),
-        style_th("Fornecedor B", "#eab308"),
-        style_th("Fornecedor C", "#eab308"),
-        style_th("Média Orçamentos", "#065f46"),
-        style_th("Preço Alvo<br/>(Média -10%)", "#1d4ed8"),
-        style_th("Valor Comprado", "#eab308"),
-        style_th("Economia Real", "#065f46"),
-        style_th("Status Meta", "#065f46"),
+    MESES_NOME = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ]
 
-    data = [th_cells]
+    resumo_mensal = {m: {"media": 0.0, "meta": 0.0, "gasto": 0.0, "economia": 0.0} for m in range(1, 13)}
+    meses_fechados = set()
 
-    cell_style = ParagraphStyle("TD", fontSize=8, leading=10, fontName="Helvetica", alignment=1)
-    cell_left = ParagraphStyle("TDL", fontSize=8, leading=10, fontName="Helvetica-Bold", alignment=0)
-    cell_bold = ParagraphStyle("TDB", fontSize=8, leading=10, fontName="Helvetica-Bold", alignment=1)
+    # A. Busca meses já arquivados no Supabase (Fev a Jul)
+    if supabase:
+        try:
+            res_f = supabase.table("fechamento_mensal").select("*").eq("ano", str(ano_referencia)).execute().data
+            if res_f:
+                for f in res_f:
+                    m_idx = int(str(f.get("mes")).strip())
+                    resumo_mensal[m_idx]["media"] = float(f.get("total_medias") or 0)
+                    resumo_mensal[m_idx]["meta"] = float(f.get("meta_gasto") or 0)
+                    resumo_mensal[m_idx]["gasto"] = float(f.get("gasto_real") or 0)
+                    resumo_mensal[m_idx]["economia"] = float(f.get("economia_total") or 0)
+                    meses_fechados.add(m_idx)
+        except Exception as e_fech:
+            st.sidebar.error(f"Erro ao carregar fechamento_mensal: {e_fech}")
 
-    tot_orcam_geral = 0.0
-    tot_alvo_geral = 0.0
-    tot_comprado_geral = 0.0
-    tot_economia_geral = 0.0
+    # B. Soma TODOS os itens ativos no Supabase apenas para os meses NÃO fechados (Agosto em diante)
+    for item in resp_cot_hist:
+        dt_c = item.get("data_cotacao") or ""
+        try:
+            dt_obj = datetime.datetime.strptime(dt_c, "%Y-%m-%d")
+            if str(dt_obj.year) == str(ano_referencia):
+                m_idx = dt_obj.month
+                if m_idx not in meses_fechados:
+                    resumo_mensal[m_idx]["media"] += float(item.get("media_orcam", 0) or 0)
+                    resumo_mensal[m_idx]["meta"] += float(item.get("preco_alvo", 0) or 0)
+                    resumo_mensal[m_idx]["gasto"] += float(item.get("valor_comprado", 0) or 0)
+                    resumo_mensal[m_idx]["economia"] += float(item.get("economia_real", 0) or 0)
+        except Exception:
+            pass
 
-    table_styles = [
-        ("BACKGROUND", (0, 0), (4, 0), colors.HexColor("#eab308")),
-        ("BACKGROUND", (5, 0), (5, 0), colors.HexColor("#065f46")),
-        ("BACKGROUND", (6, 0), (6, 0), colors.HexColor("#1d4ed8")),
-        ("BACKGROUND", (7, 0), (7, 0), colors.HexColor("#eab308")),
-        ("BACKGROUND", (8, 0), (9, 0), colors.HexColor("#065f46")),
+    th_res_white = ParagraphStyle("THRW", fontSize=7.5, leading=9, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+    th_res_dark = ParagraphStyle("THRD", fontSize=7.5, leading=9, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f172a"), alignment=1)
+    td_res_style = ParagraphStyle("TDRS", fontSize=7.5, leading=9, fontName="Helvetica", alignment=1)
+    td_res_bold = ParagraphStyle("TDRB", fontSize=7.5, leading=9, fontName="Helvetica-Bold", alignment=1)
+
+    resumo_data = [[
+        Paragraph("<b>Mês</b>", th_res_white),
+        Paragraph("<b>Total Médias (R$)</b>", th_res_dark),
+        Paragraph("<b>Meta de Gasto (R$)</b>", th_res_dark),
+        Paragraph("<b>Gasto Real (R$)</b>", th_res_dark),
+        Paragraph("<b>Economia Total (R$)</b>", th_res_white),
+        Paragraph("<b>% Economia</b>", th_res_white),
+    ]]
+
+    resumo_styles = [
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#065f46")),
+        ("BACKGROUND", (1, 0), (3, 0), colors.HexColor("#eab308")),
+        ("BACKGROUND", (4, 0), (5, 0), colors.HexColor("#065f46")),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
 
-    for row_idx, item in enumerate(resp_cot_hist, start=1):
-        dt_c = item.get("data_cotacao") or ""
-        try:
-            dt_formatted = datetime.datetime.strptime(dt_c, "%Y-%m-%d").strftime("%d/%m/%Y")
-        except Exception:
-            dt_formatted = dt_c
+    tot_med_ano = sum(r["media"] for r in resumo_mensal.values())
+    tot_meta_ano = sum(r["meta"] for r in resumo_mensal.values())
+    tot_gasto_ano = sum(r["gasto"] for r in resumo_mensal.values())
+    tot_econ_ano = sum(r["economia"] for r in resumo_mensal.values())
+    tot_pct_ano = (tot_econ_ano / tot_med_ano * 100) if tot_med_ano > 0 else 0.0
 
-        prod = item.get("produto", "N/A")
-        forn_a = item.get("fornecedor_a", "N/A")
-        forn_b = item.get("fornecedor_b", "N/A")
-        forn_c = item.get("fornecedor_c", "N/A")
-        med = float(item.get("media_orcam", 0) or 0)
-        alvo = float(item.get("preco_alvo", 0) or 0)
-        comp = float(item.get("valor_comprado", 0) or 0)
-        econ = float(item.get("economia_real", 0) or 0)
-        st_meta = item.get("status_meta", "N/A")
+    for m_idx in range(1, 13):
+        nome_mes = MESES_NOME[m_idx - 1]
+        med = resumo_mensal[m_idx]["media"]
+        meta = resumo_mensal[m_idx]["meta"]
+        gasto = resumo_mensal[m_idx]["gasto"]
+        econ = resumo_mensal[m_idx]["economia"]
+        pct = (econ / med * 100) if med > 0 else 0.0
 
-        tot_orcam_geral += med
-        tot_alvo_geral += alvo
-        tot_comprado_geral += comp
-        tot_economia_geral += econ
+        bg_color = colors.HexColor("#d1fae5") if med > 0 else colors.HexColor("#ffffff")
 
-        if "Atingida" in st_meta and "Não" not in st_meta:
-            st_text = "<font color='#15803d'><b>Atingida</b></font>"
-        else:
-            st_text = "<font color='#dc2626'><b>Não Atingida</b></font>"
+        resumo_data.append([
+            Paragraph(nome_mes, td_res_bold),
+            Paragraph(f"R$ {formar_real(med)}", td_res_style),
+            Paragraph(f"R$ {formar_real(meta)}", td_res_style),
+            Paragraph(f"R$ {formar_real(gasto)}", td_res_style),
+            Paragraph(f"R$ {formar_real(econ)}", td_res_bold),
+            Paragraph(f"{pct:.2f}%", td_res_bold),
+        ])
+        resumo_styles.append(("BACKGROUND", (0, m_idx), (-1, m_idx), bg_color))
 
-        row = [
-            Paragraph(dt_formatted, cell_style),
-            Paragraph(prod, cell_left),
-            Paragraph(forn_a, cell_style),
-            Paragraph(forn_b, cell_style),
-            Paragraph(forn_c, cell_style),
-            Paragraph(f"R$ {formar_real(med)}", cell_bold),
-            Paragraph(f"R$ {formar_real(alvo)}", cell_bold),
-            Paragraph(f"R$ {formar_real(comp)}", cell_bold),
-            Paragraph(f"R$ {formar_real(econ)}", cell_bold),
-            Paragraph(st_text, cell_style),
-        ]
-        data.append(row)
+    tot_row_idx = len(resumo_data)
+    tot_txt_style = ParagraphStyle("TTXT", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f172a"), alignment=1)
+    tot_white_style = ParagraphStyle("TTXTW", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
 
-        table_styles.append(("BACKGROUND", (2, row_idx), (4, row_idx), colors.HexColor("#fef08a")))
-        table_styles.append(("BACKGROUND", (5, row_idx), (5, row_idx), colors.HexColor("#d1fae5")))
-        table_styles.append(("BACKGROUND", (6, row_idx), (6, row_idx), colors.HexColor("#dbeafe")))
-        table_styles.append(("BACKGROUND", (7, row_idx), (7, row_idx), colors.HexColor("#fef08a")))
-        table_styles.append(("BACKGROUND", (8, row_idx), (8, row_idx), colors.HexColor("#d1fae5")))
-
-    tot_row_idx = len(data)
-    tot_style_label = ParagraphStyle("TOTL", fontSize=8, leading=10, fontName="Helvetica-Bold", alignment=2)
-    tot_style_m = ParagraphStyle("TOTM", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#065f46"), alignment=1)
-    tot_style_a = ParagraphStyle("TOTA", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#1d4ed8"), alignment=1)
-    tot_style_c = ParagraphStyle("TOTC", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#854d0e"), alignment=1)
-    tot_style_e = ParagraphStyle("TOTE", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#065f46"), alignment=1)
-
-    data.append([
-        Paragraph("<b>TOTAIS ACUMULADOS:</b>", tot_style_label),
-        "", "", "", "",
-        Paragraph(f"R$ {formar_real(tot_orcam_geral)}", tot_style_m),
-        Paragraph(f"R$ {formar_real(tot_alvo_geral)}", tot_style_a),
-        Paragraph(f"R$ {formar_real(tot_comprado_geral)}", tot_style_c),
-        Paragraph(f"R$ {formar_real(tot_economia_geral)}", tot_style_e),
-        Paragraph("-", cell_style),
+    resumo_data.append([
+        Paragraph("TOTAL", tot_txt_style),
+        Paragraph(f"R$ {formar_real(tot_med_ano)}", tot_txt_style),
+        Paragraph(f"R$ {formar_real(tot_meta_ano)}", tot_txt_style),
+        Paragraph(f"R$ {formar_real(tot_gasto_ano)}", tot_txt_style),
+        Paragraph(f"R$ {formar_real(tot_econ_ano)}", tot_txt_style),
+        Paragraph(f"{tot_pct_ano:.2f}%", tot_white_style),
     ])
 
-    table_styles.append(("SPAN", (0, tot_row_idx), (4, tot_row_idx)))
-    table_styles.append(("BACKGROUND", (0, tot_row_idx), (-1, tot_row_idx), colors.HexColor("#f1f5f9")))
+    resumo_styles.append(("BACKGROUND", (0, tot_row_idx), (4, tot_row_idx), colors.HexColor("#93c5fd")))
+    resumo_styles.append(("BACKGROUND", (5, tot_row_idx), (5, tot_row_idx), colors.HexColor("#15803d")))
 
-    col_widths = [60, 125, 90, 90, 90, 75, 75, 75, 72, 60]
+    t_resumo = Table(resumo_data, colWidths=[100, 140, 140, 140, 140, 100])
+    t_resumo.setStyle(TableStyle(resumo_styles))
+    elements.append(t_resumo)
+    elements.append(Spacer(1, 12))
 
-    t = Table(data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle(table_styles))
+    # --- DETALHAMENTO DAS COTAÇÕES ATIVAS DO MÊS ---
+    if resp_cot_hist:
+        elements.append(Paragraph("<b>📋 DETALHAMENTO DOS ITENS COTADOS NO PERÍODO ATIVO</b>", title_style))
+        elements.append(Spacer(1, 6))
 
-    elements.append(t)
+        th_det_white = ParagraphStyle("THDW", fontSize=7.5, leading=9, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+        th_det_dark = ParagraphStyle("THDD", fontSize=7.5, leading=9, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f172a"), alignment=1)
+
+        comp_cells = [
+            Paragraph("<b>Mês / Data</b>", th_det_dark),
+            Paragraph("<b>Produto</b>", th_det_dark),
+            Paragraph("<b>Fornecedor A</b>", th_det_dark),
+            Paragraph("<b>Fornecedor B</b>", th_det_dark),
+            Paragraph("<b>Fornecedor C</b>", th_det_dark),
+            Paragraph("<b>Média Orçamentos</b>", th_det_white),
+            Paragraph("<b>Preço Alvo</b>", th_det_white),
+            Paragraph("<b>Valor Comprado</b>", th_det_dark),
+            Paragraph("<b>Economia Real</b>", th_det_white),
+            Paragraph("<b>Status Meta</b>", th_det_white),
+        ]
+
+        det_data = [comp_cells]
+        det_styles = [
+            ("BACKGROUND", (0, 0), (4, 0), colors.HexColor("#eab308")),
+            ("BACKGROUND", (5, 0), (5, 0), colors.HexColor("#065f46")),
+            ("BACKGROUND", (6, 0), (6, 0), colors.HexColor("#1d4ed8")),
+            ("BACKGROUND", (7, 0), (7, 0), colors.HexColor("#eab308")),
+            ("BACKGROUND", (8, 0), (9, 0), colors.HexColor("#065f46")),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]
+
+        cell_style = ParagraphStyle("TD", fontSize=7, leading=9, fontName="Helvetica", alignment=1)
+        cell_left = ParagraphStyle("TDL", fontSize=7, leading=9, fontName="Helvetica-Bold", alignment=0)
+        cell_bold = ParagraphStyle("TDB", fontSize=7, leading=9, fontName="Helvetica-Bold", alignment=1)
+
+        for row_idx, item in enumerate(resp_cot_hist, start=1):
+            dt_c = item.get("data_cotacao") or ""
+            try:
+                dt_formatted = datetime.datetime.strptime(dt_c, "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                dt_formatted = dt_c
+
+            prod = item.get("produto", "N/A")
+            forn_a = item.get("fornecedor_a", "N/A")
+            forn_b = item.get("fornecedor_b", "N/A")
+            forn_c = item.get("fornecedor_c", "N/A")
+            med = float(item.get("media_orcam", 0) or 0)
+            alvo = float(item.get("preco_alvo", 0) or 0)
+            comp = float(item.get("valor_comprado", 0) or 0)
+            econ = float(item.get("economia_real", 0) or 0)
+            st_meta = item.get("status_meta", "N/A")
+
+            st_text = "<font color='#15803d'><b>Atingida</b></font>" if ("Atingida" in st_meta and "Não" not in st_meta) else "<font color='#dc2626'><b>Não Atingida</b></font>"
+
+            det_data.append([
+                Paragraph(dt_formatted, cell_style),
+                Paragraph(prod, cell_left),
+                Paragraph(forn_a, cell_style),
+                Paragraph(forn_b, cell_style),
+                Paragraph(forn_c, cell_style),
+                Paragraph(f"R$ {formar_real(med)}", cell_bold),
+                Paragraph(f"R$ {formar_real(alvo)}", cell_bold),
+                Paragraph(f"R$ {formar_real(comp)}", cell_bold),
+                Paragraph(f"R$ {formar_real(econ)}", cell_bold),
+                Paragraph(st_text, cell_style),
+            ])
+
+            det_styles.append(("BACKGROUND", (2, row_idx), (4, row_idx), colors.HexColor("#fef08a")))
+            det_styles.append(("BACKGROUND", (5, row_idx), (5, row_idx), colors.HexColor("#d1fae5")))
+            det_styles.append(("BACKGROUND", (6, row_idx), (6, row_idx), colors.HexColor("#dbeafe")))
+            det_styles.append(("BACKGROUND", (7, row_idx), (7, row_idx), colors.HexColor("#fef08a")))
+            det_styles.append(("BACKGROUND", (8, row_idx), (8, row_idx), colors.HexColor("#d1fae5")))
+
+        t_detalhe = Table(det_data, colWidths=[55, 130, 90, 90, 90, 75, 75, 75, 70, 60], repeatRows=1)
+        t_detalhe.setStyle(TableStyle(det_styles))
+        elements.append(t_detalhe)
+
     doc.build(elements)
     return buffer.getvalue()
 
@@ -1377,52 +1426,51 @@ if aba_gestao:
 
                         resp_cot_hist_raw = supabase.table("cotacoes").select("*").order("id", desc=True).execute().data
 
-                        resp_cot_hist = []
-                        cotacoes_pendentes_cnt = 0
+                        resp_cot_hist_detalhes = []
+                        resp_cot_hist_ano_todo = []
 
                         if resp_cot_hist_raw:
                             for c in resp_cot_hist_raw:
                                 dt_cotacao = c.get("data_cotacao", "")
-                                
+                                p_id = c.get("pedido_id")
+                                is_comprado = (p_id is None or str(p_id) in ids_comprados)
+
+                                # Cotações do ano para compor a tabela superior
+                                if ano_filtro == "Todos" or dt_cotacao.startswith(ano_filtro):
+                                    if is_comprado:
+                                        resp_cot_hist_ano_todo.append(c)
+
+                                # Filtra por mês para a tabela de detalhamento abaixo
                                 if ano_filtro != "Todos" and not dt_cotacao.startswith(ano_filtro):
                                     continue
                                 if mes_filtro != "Todos" and f"-{mes_filtro}-" not in dt_cotacao:
                                     continue
 
-                                p_id = c.get("pedido_id")
-                                if p_id is None or str(p_id) in ids_comprados:
-                                    resp_cot_hist.append(c)
-                                else:
-                                    cotacoes_pendentes_cnt += 1
+                                if is_comprado:
+                                    resp_cot_hist_detalhes.append(c)
 
-                        if not resp_cot_hist:
-                            if cotacoes_pendentes_cnt > 0:
-                                st.warning("⚠️ Existem cotações neste período, mas os pedidos ainda estão como 'Pendente'. Mude o status para 'Aguardando entrega' para que entrem no relatório.")
-                            else:
-                                st.warning(f"⚠️ Nenhuma cotação aprovada encontrada para o período: Mês {mes_filtro} / Ano {ano_filtro}.")
-                        else:
-                            pdf_bytes_controle = gerar_pdf_controle_compras(resp_cot_hist)
-                            
-                            rotulo_periodo = f"{mes_filtro}-{ano_filtro}" if mes_filtro != "Todos" else f"Geral_{ano_filtro}"
-                            nome_planilha = f"Controle_Compras_{rotulo_periodo}.pdf"
+                        pdf_bytes_controle = gerar_pdf_controle_compras(resp_cot_hist_ano_todo, ano_referencia=ano_filtro)
+                        
+                        rotulo_periodo = f"{mes_filtro}-{ano_filtro}" if mes_filtro != "Todos" else f"Geral_{ano_filtro}"
+                        nome_planilha = f"Controle_Compras_{rotulo_periodo}.pdf"
 
-                            link_planilha = salvar_nf_no_drive(
-                                pdf_bytes_controle,
-                                nome_planilha,
-                                mime_type="application/pdf",
-                                as_google_doc=False,
-                                nome_subpasta=["Relatórios IA", "Fechamentos Mensais", rotulo_periodo],
+                        link_planilha = salvar_nf_no_drive(
+                            pdf_bytes_controle,
+                            nome_planilha,
+                            mime_type="application/pdf",
+                            as_google_doc=False,
+                            nome_subpasta=["Relatórios IA", "Fechamentos Mensais", rotulo_periodo],
+                        )
+
+                        if link_planilha:
+                            st.success(f"✅ Relatório de {rotulo_periodo} gerado com sucesso!")
+                            st.markdown(f"🔗 **[Abrir PDF da Planilha no Google Drive]({link_planilha})**")
+                            st.download_button(
+                                label="📥 Baixar Arquivo PDF no Computador",
+                                data=pdf_bytes_controle,
+                                file_name=nome_planilha,
+                                mime="application/pdf",
                             )
-
-                            if link_planilha:
-                                st.success(f"✅ Relatório de {rotulo_periodo} gerado com sucesso!")
-                                st.markdown(f"🔗 **[Abrir PDF da Planilha no Google Drive]({link_planilha})**")
-                                st.download_button(
-                                    label="📥 Baixar Arquivo PDF no Computador",
-                                    data=pdf_bytes_controle,
-                                    file_name=nome_planilha,
-                                    mime="application/pdf",
-                                )
 
                     except Exception as e_pdf_gen:
                         st.error(f"Erro ao gerar PDF: {e_pdf_gen}")
