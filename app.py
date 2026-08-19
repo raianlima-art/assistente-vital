@@ -546,24 +546,24 @@ def gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas
 
     td_style = ParagraphStyle("TDC", fontSize=8, leading=10, fontName="Helvetica", alignment=0)
     td_bold = ParagraphStyle("TDCB", fontSize=8, leading=10, fontName="Helvetica-Bold", alignment=0)
-    venc_style = ParagraphStyle("VENC", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#15803d"), alignment=1)
+    aprov_style = ParagraphStyle("APROV", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.HexColor("#15803d"), alignment=1)
     opc_style = ParagraphStyle("OPC", fontSize=8, leading=10, fontName="Helvetica", textColor=colors.HexColor("#64748b"), alignment=1)
 
     for idx, op in enumerate(opcoes_ordenadas, 1):
-        is_vencedor = idx == 1
-        st_badge = Paragraph("🏆 VENCEDOR", venc_style) if is_vencedor else Paragraph("Opção", opc_style)
+        is_aprovado = idx == 1
+        st_badge = Paragraph("APROVADO", aprov_style) if is_aprovado else Paragraph("Cotação", opc_style)
         link_str = f"<font color='#0284c7'><u>Acessar Cotação</u></font>" if op.get("link") else "Sem link"
 
         row = [
-            Paragraph(op["nome"], td_bold if is_vencedor else td_style),
+            Paragraph(op["nome"], td_bold if is_aprovado else td_style),
             Paragraph(f"R$ {formar_real(op['pu'])}", td_style),
             Paragraph(f"R$ {formar_real(op['frete'])}", td_style),
-            Paragraph(f"R$ {formar_real(op['total'])}", td_bold if is_vencedor else td_style),
+            Paragraph(f"R$ {formar_real(op['total'])}", td_bold if is_aprovado else td_style),
             Paragraph(link_str, td_style),
             st_badge,
         ]
         comp_data.append(row)
-        if is_vencedor:
+        if is_aprovado:
             comp_styles.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#f0fdf4")))
 
     comp_table = Table(comp_data, colWidths=[120, 75, 65, 80, 110, 90])
@@ -573,7 +573,7 @@ def gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas
     elements.append(Spacer(1, 15))
 
     venc_box_data = [
-        [Paragraph("<b>🏆 FORNECEDOR VENCEDOR SELECIONADO:</b>", ParagraphStyle("VTB", fontSize=9, leading=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#166534")))],
+        [Paragraph("<b>📌 ORÇAMENTO APROVADO:</b>", ParagraphStyle("VTB", fontSize=9, leading=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#166534")))],
         [Paragraph(f"<b>{vencedor['nome']}</b> — Valor Total Aprovado: <b>R$ {formar_real(vencedor['total'])}</b>", ParagraphStyle("VD", fontSize=9, leading=12, fontName="Helvetica", textColor=colors.HexColor("#14532d")))],
     ]
     venc_table = Table(venc_box_data, colWidths=[540])
