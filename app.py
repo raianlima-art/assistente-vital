@@ -263,7 +263,7 @@ def formar_real(valor):
         return "0,00"
 
 
-def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
+def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_referencia="2026"):
     if ano_referencia == "Todos":
         ano_referencia = str(datetime.datetime.now().year)
 
@@ -299,7 +299,7 @@ def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
     resumo_mensal = {m: {"media": 0.0, "meta": 0.0, "gasto": 0.0, "economia": 0.0} for m in range(1, 13)}
     meses_fechados = set()
 
-    # A. Busca meses já arquivados no Supabase (Fev a Jul)
+    # A. Busca meses já arquivados no Supabase
     if supabase:
         try:
             res_f = supabase.table("fechamento_mensal").select("*").eq("ano", str(ano_referencia)).execute().data
@@ -314,7 +314,7 @@ def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
         except Exception as e_fech:
             st.sidebar.error(f"Erro ao carregar fechamento_mensal: {e_fech}")
 
-    # B. Soma TODOS os itens ativos no Supabase apenas para os meses NÃO fechados (Agosto em diante)
+    # B. Soma TODOS os itens ativos no Supabase apenas para os meses NÃO fechados
     for item in resp_cot_hist:
         dt_c = item.get("data_cotacao") or ""
         try:
@@ -401,8 +401,22 @@ def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
     elements.append(t_resumo)
     elements.append(Spacer(1, 12))
 
-    # --- DETALHAMENTO DAS COTAÇÕES ATIVAS DO MÊS ---
-    if resp_cot_hist:
+    # --- DETALHAMENTO DAS COTAÇÕES ATIVAS (FILTRADAS PELO MÊS SELECIONADO) ---
+    cotacoes_filtradas_mes = []
+    for item in resp_cot_hist:
+        dt_c = item.get("data_cotacao") or ""
+        try:
+            dt_obj = datetime.datetime.strptime(dt_c, "%Y-%m-%d")
+            m_str = f"{dt_obj.month:02d}"
+            a_str = str(dt_obj.year)
+
+            if (ano_referencia == "Todos" or a_str == str(ano_referencia)) and \
+               (mes_referencia == "Todos" or m_str == str(mes_referencia)):
+                cotacoes_filtradas_mes.append(item)
+        except Exception:
+            pass
+
+    if cotacoes_filtradas_mes:
         elements.append(Paragraph("<b>📋 DETALHAMENTO DOS ITENS COTADOS NO PERÍODO ATIVO</b>", title_style))
         elements.append(Spacer(1, 6))
 
@@ -440,7 +454,7 @@ def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
         cell_left = ParagraphStyle("TDL", fontSize=7, leading=9, fontName="Helvetica-Bold", alignment=0)
         cell_bold = ParagraphStyle("TDB", fontSize=7, leading=9, fontName="Helvetica-Bold", alignment=1)
 
-        for row_idx, item in enumerate(resp_cot_hist, start=1):
+        for row_idx, item in enumerate(cotacoes_filtradas_mes, start=1):
             dt_c = item.get("data_cotacao") or ""
             try:
                 dt_formatted = datetime.datetime.strptime(dt_c, "%Y-%m-%d").strftime("%d/%m/%Y")
@@ -481,6 +495,10 @@ def gerar_pdf_controle_compras(resp_cot_hist, ano_referencia="2026"):
         t_detalhe = Table(det_data, colWidths=[55, 130, 90, 90, 90, 75, 75, 75, 70, 60], repeatRows=1)
         t_detalhe.setStyle(TableStyle(det_styles))
         elements.append(t_detalhe)
+    else:
+        msg_style = ParagraphStyle("MSGV", fontSize=8, leading=10, fontName="Helvetica-Oblique", textColor=colors.HexColor("#64748b"), alignment=1)
+        elements.append(Spacer(1, 8))
+        elements.append(Paragraph(f"<i>Nenhum item ativo para detalhamento no período {mes_referencia}/{ano_referencia}. (Dados arquivados ou sem cotações no mês)</i>", msg_style))
 
     doc.build(elements)
     return buffer.getvalue()
@@ -1449,7 +1467,11 @@ if aba_gestao:
                                 if is_comprado:
                                     resp_cot_hist_detalhes.append(c)
 
-                        pdf_bytes_controle = gerar_pdf_controle_compras(resp_cot_hist_ano_todo, ano_referencia=ano_filtro)
+                        pdf_bytes_controle = gerar_pdf_controle_compras(
+                            resp_cot_hist_ano_todo,
+                            mes_referencia=mes_filtro,
+                            ano_referencia=ano_filtro,
+                        )
                         
                         rotulo_periodo = f"{mes_filtro}-{ano_filtro}" if mes_filtro != "Todos" else f"Geral_{ano_filtro}"
                         nome_planilha = f"Controle_Compras_{rotulo_periodo}.pdf"
