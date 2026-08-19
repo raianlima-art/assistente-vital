@@ -1564,6 +1564,7 @@ if aba_gestao:
                     [
                         "Selecione para filtrar...",
                         "Pendente",
+                        "Falta Cotação (Sem Cotação Anexada)",
                         "Aguardando entrega",
                         "Aguardando NF",
                         "Finalizado",
@@ -1584,10 +1585,17 @@ if aba_gestao:
             else:
                 query = supabase.table("solicitacoes_compras").select("*")
 
-                if filtro_status != "Todos (Com Histórico)":
+                if filtro_status == "Falta Cotação (Sem Cotação Anexada)":
+                    dados_compras = query.order("id", desc=True).execute().data
+                    dados_compras = [
+                        item for item in dados_compras 
+                        if not item.get("link_cotacao") and item.get("status") not in ["Finalizado", "Recusado"]
+                    ]
+                elif filtro_status != "Todos (Com Histórico)":
                     query = query.eq("status", filtro_status)
-
-                dados_compras = query.order("id", desc=True).execute().data
+                    dados_compras = query.order("id", desc=True).execute().data
+                else:
+                    dados_compras = query.order("id", desc=True).execute().data
 
                 if filtro_filial != "Todas as Filiais" and dados_compras:
                     dados_compras = [
