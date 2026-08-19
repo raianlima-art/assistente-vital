@@ -961,82 +961,29 @@ with st.sidebar:
             st.session_state.clear()
             st.rerun()
 
-        if supabase:
-            st.divider()
-            with st.expander("🧹 Limpeza e Exportação das 3 Tabelas"):
-                st.info("Exporta compras finalizadas, desempenho de fornecedores e cotações para o Google Drive e limpa do Supabase.")
-                senha_export = st.text_input("Confirme a Senha ADM:", type="password", key="senha_exp_sb")
+        # SISTEMA DE MÓDULOS AUTOMÁTICOS (PLUGINS ADM NA BARRA LATERAL)
+        st.divider()
+        st.markdown("### 🧩 Módulos ADM")
 
-                if st.button("🚀 Exportar e Limpar", key="btn_exp_sb"):
-                    if senha_export == ADM_PASSWORD:
-                        with st.spinner("Processando exportação de 3 tabelas..."):
-                            try:
-                                data_atual = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")
-                                data_dia = datetime.datetime.now().strftime("%d-%m-%Y")
-                                caminho_backup = ["Relatórios IA", "Backup", data_dia]
-                                links_gerados = []
+        if not os.path.exists("modulos"):
+            os.makedirs("modulos")
 
-                                resp_compras = supabase.table("solicitacoes_compras").select("*").eq("status", "Finalizado").execute()
-                                dados_compras = [d for d in resp_compras.data if d.get("link_nf")]
-                                if dados_compras:
-                                    output_c = io.StringIO()
-                                    output_c.write("\ufeff")
-                                    chaves_c = set()
-                                    for d in dados_compras:
-                                        chaves_c.update(d.keys())
-                                    writer_c = csv.DictWriter(output_c, fieldnames=list(chaves_c), delimiter=";")
-                                    writer_c.writeheader()
-                                    writer_c.writerows(dados_compras)
-                                    link_c = salvar_nf_no_drive(output_c.getvalue().encode("utf-8"), f"Relatorio_Compras_{data_atual}.csv", mime_type="text/csv", nome_subpasta=caminho_backup)
-                                    if link_c:
-                                        for item in dados_compras:
-                                            supabase.table("solicitacoes_compras").delete().eq("id", item["id"]).execute()
-                                        links_gerados.append(("Compras", link_c, len(dados_compras)))
+        arquivos_modulos = glob.glob("modulos/*.py")
 
-                                resp_desemp = supabase.table("desempenho_fornecedores").select("*").execute()
-                                dados_desemp = resp_desemp.data
-                                if dados_desemp:
-                                    output_d = io.StringIO()
-                                    output_d.write("\ufeff")
-                                    chaves_d = set()
-                                    for d in dados_desemp:
-                                        chaves_d.update(d.keys())
-                                    writer_d = csv.DictWriter(output_d, fieldnames=list(chaves_d), delimiter=";")
-                                    writer_d.writeheader()
-                                    writer_d.writerows(dados_desemp)
-                                    link_d = salvar_nf_no_drive(output_d.getvalue().encode("utf-8"), f"Relatorio_Desempenho_Fornecedores_{data_atual}.csv", mime_type="text/csv", nome_subpasta=caminho_backup)
-                                    if link_d:
-                                        for item in dados_desemp:
-                                            supabase.table("desempenho_fornecedores").delete().eq("id", item["id"]).execute()
-                                        links_gerados.append(("Fornecedores", link_d, len(dados_desemp)))
+        if not arquivos_modulos:
+            st.info("Nenhum módulo extra detectado.")
 
-                                resp_cot = supabase.table("cotacoes").select("*").execute()
-                                dados_cot = resp_cot.data
-                                if dados_cot:
-                                    output_cot = io.StringIO()
-                                    output_cot.write("\ufeff")
-                                    chaves_cot = set()
-                                    for d in dados_cot:
-                                        chaves_cot.update(d.keys())
-                                    writer_cot = csv.DictWriter(output_cot, fieldnames=list(chaves_cot), delimiter=";")
-                                    writer_cot.writeheader()
-                                    writer_cot.writerows(dados_cot)
-                                    link_cot = salvar_nf_no_drive(output_cot.getvalue().encode("utf-8"), f"Relatorio_Cotacoes_{data_atual}.csv", mime_type="text/csv", nome_subpasta=caminho_backup)
-                                    if link_cot:
-                                        for item in dados_cot:
-                                            supabase.table("cotacoes").delete().eq("id", item["id"]).execute()
-                                        links_gerados.append(("Cotações", link_cot, len(dados_cot)))
+        for arquivo_py in arquivos_modulos:
+            try:
+                nome_modulo = os.path.basename(arquivo_py)[:-3]
+                spec = importlib.util.spec_from_file_location(nome_modulo, arquivo_py)
+                modulo = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(modulo)
 
-                                if not links_gerados:
-                                    st.warning("Nenhum dado pendente encontrado.")
-                                else:
-                                    st.success("✅ Concluído!")
-                                    for titulo, link_d, qtd in links_gerados:
-                                        st.markdown(f"📊 **{titulo}:** {qtd} item(ns) — [Abrir Drive]({link_d})")
-                            except Exception as e:
-                                st.error(f"❌ Erro: {e}")
-                    else:
-                        st.error("❌ Senha incorreta!")
+                if hasattr(modulo, "iniciar"):
+                    modulo.iniciar()
+            except Exception as e:
+                st.error(f"Erro ao carregar módulo {arquivo_py}: {e}")
 
         st.divider()
         st.header("⚙️ Configurações Fixas")
@@ -1389,26 +1336,20 @@ if aba_gestao:
         st.subheader("📋 Gestão e Aprovação de Pedidos (Acesso ADM)")
 
         if supabase:
-            try:
-                res_kpi = supabase.table("desempenho_fornecedores").select("*").execute().data
-                if res_kpi:
-                    lead_times = [k.get("lead_time_dias") for k in res_kpi if k.get("lead_time_dias") is not None]
-                    lt_medio = sum(lead_times) / len(lead_times) if lead_times else 0.0
+            st.markdown("#### 📊 Relatórios de Controle de Compras")
+            col_mes, col_ano, col_btn_rel = st.columns([1, 1, 2])
+            with col_mes:
+                mes_filtro = st.selectbox("Mês:", ["Todos", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"], index=datetime.datetime.now().month)
+            with col_ano:
+                ano_filtro = st.selectbox("Ano:", ["Todos", "2025", "2026", "2027", "2028"], index=2)
+            
+            with col_btn_rel:
+                st.write("")
+                btn_relatorio = st.button("📄 Gerar Relatório (PDF)", use_container_width=True)
 
-                    otifs = [k.get("otif_ok") for k in res_kpi if k.get("otif_ok") is not None]
-                    otif_pct = (sum(1 for o in otifs if o) / len(otifs) * 100) if otifs else 0.0
-
-                    prazos_pg = [k.get("prazo_pagamento_dias") for k in res_kpi if k.get("prazo_pagamento_dias") is not None]
-                    pmp_medio = sum(prazos_pg) / len(prazos_pg) if prazos_pg else 0.0
-
-                    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
-                    col_kpi1.metric("⏱️ Lead Time Médio", f"{lt_medio:.1f} dias")
-                    col_kpi2.metric("🎯 OTIF / Qualidade", f"{otif_pct:.1f}%")
-                    col_kpi3.metric("💳 Prazo Médio Pagto", f"{pmp_medio:.0f} dias")
-                    st.divider()
-
-                if st.button("📊 Gerar Planilha 'Controle de Compras 2026' (PDF / Google Drive)"):
-                    with st.spinner("Gerando PDF em formato Paisagem..."):
+            if btn_relatorio:
+                with st.spinner("Filtrando período e gerando PDF..."):
+                    try:
                         resp_compras_compradas = (
                             supabase.table("solicitacoes_compras")
                             .select("id")
@@ -1425,6 +1366,13 @@ if aba_gestao:
 
                         if resp_cot_hist_raw:
                             for c in resp_cot_hist_raw:
+                                dt_cotacao = c.get("data_cotacao", "")
+                                
+                                if ano_filtro != "Todos" and not dt_cotacao.startswith(ano_filtro):
+                                    continue
+                                if mes_filtro != "Todos" and f"-{mes_filtro}-" not in dt_cotacao:
+                                    continue
+
                                 p_id = c.get("pedido_id")
                                 if p_id is None or str(p_id) in ids_comprados:
                                     resp_cot_hist.append(c)
@@ -1433,25 +1381,25 @@ if aba_gestao:
 
                         if not resp_cot_hist:
                             if cotacoes_pendentes_cnt > 0:
-                                st.warning(
-                                    f"⚠️ Existem {cotacoes_pendentes_cnt} cotação(ões) salvas, mas o pedido correspondente ainda está com status 'Pendente'. Mude o status do pedido para 'Aguardando entrega' ou 'Finalizado' para entrar na planilha de compras efetuadas."
-                                )
+                                st.warning("⚠️ Existem cotações neste período, mas os pedidos ainda estão como 'Pendente'. Mude o status para 'Aguardando entrega' para que entrem no relatório.")
                             else:
-                                st.warning("⚠️ Nenhuma cotação salva encontrada na tabela 'cotacoes'. Certifique-se de executar o SQL no Supabase.")
+                                st.warning(f"⚠️ Nenhuma cotação aprovada encontrada para o período: Mês {mes_filtro} / Ano {ano_filtro}.")
                         else:
                             pdf_bytes_controle = gerar_pdf_controle_compras(resp_cot_hist)
-                            nome_planilha = f"Planilha_Controle_de_Compras_2026_{datetime.date.today().strftime('%d-%m-%Y')}.pdf"
+                            
+                            rotulo_periodo = f"{mes_filtro}-{ano_filtro}" if mes_filtro != "Todos" else f"Geral_{ano_filtro}"
+                            nome_planilha = f"Controle_Compras_{rotulo_periodo}.pdf"
 
                             link_planilha = salvar_nf_no_drive(
                                 pdf_bytes_controle,
                                 nome_planilha,
                                 mime_type="application/pdf",
                                 as_google_doc=False,
-                                nome_subpasta=["Relatórios IA", "PDFs Atuais"],
+                                nome_subpasta=["Relatórios IA", "Fechamentos Mensais", rotulo_periodo],
                             )
 
                             if link_planilha:
-                                st.success("✅ PDF 'Controle de compras 2026' gerado no Google Drive!")
+                                st.success(f"✅ Relatório de {rotulo_periodo} gerado com sucesso!")
                                 st.markdown(f"🔗 **[Abrir PDF da Planilha no Google Drive]({link_planilha})**")
                                 st.download_button(
                                     label="📥 Baixar Arquivo PDF no Computador",
@@ -1460,8 +1408,8 @@ if aba_gestao:
                                     mime="application/pdf",
                                 )
 
-            except Exception as e_pdf_gen:
-                st.error(f"Erro ao gerar PDF: {e_pdf_gen}")
+                    except Exception as e_pdf_gen:
+                        st.error(f"Erro ao gerar PDF: {e_pdf_gen}")
 
             with st.expander("➕ Cadastrar Novo Pedido Manualmente (ADM)"):
                 with st.form("form_novo_pedido_adm"):
@@ -1757,16 +1705,16 @@ if aba_gestao:
                                                 with st.spinner("Enviando Cotação para o Google Drive..."):
                                                     bytes_cot = uploaded_cot.read()
                                                     nome_cot = f"Cotacao_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                    
+
                                                     mes_ano = datetime.datetime.now().strftime("%m-%Y")
                                                     dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
-                                                    
+
                                                     link_cot_drive = salvar_nf_no_drive(
-                                                        bytes_cot, 
-                                                        nome_cot, 
-                                                        nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot]
+                                                        bytes_cot,
+                                                        nome_cot,
+                                                        nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot],
                                                     )
-                                                    
+
                                                     if link_cot_drive:
                                                         update_payload["link_cotacao"] = link_cot_drive
 
@@ -1806,28 +1754,3 @@ if aba_gestao:
                                 st.rerun()
 
                         st.divider()
-
-        # =====================================================================
-        # SISTEMA DE MÓDULOS AUTOMÁTICOS (PLUGINS)
-        # =====================================================================
-        st.markdown("### 🧩 Módulos e Ferramentas Extras")
-
-        if not os.path.exists("modulos"):
-            os.makedirs("modulos")
-
-        arquivos_modulos = glob.glob("modulos/*.py")
-
-        if not arquivos_modulos:
-            st.info("Nenhum módulo extra detectado. Para adicionar funções como Leitura de Backups, coloque o arquivo .py na pasta 'modulos'.")
-
-        for arquivo_py in arquivos_modulos:
-            try:
-                nome_modulo = os.path.basename(arquivo_py)[:-3]
-                spec = importlib.util.spec_from_file_location(nome_modulo, arquivo_py)
-                modulo = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(modulo)
-
-                if hasattr(modulo, "iniciar"):
-                    modulo.iniciar()
-            except Exception as e:
-                st.error(f"Erro ao carregar o módulo {arquivo_py}: {e}")
