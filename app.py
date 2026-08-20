@@ -8,7 +8,6 @@ import json
 import os
 import smtplib
 import unicodedata
-import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
@@ -78,7 +77,7 @@ def carregar_css(caminho="style.css"):
 carregar_css()
 
 # -----------------------------------------------------------------------------
-# 3. INICIALIZAÇÃO DE CONEXÕES E WHATSAPP
+# 3. INICIALIZAÇÃO DE CONEXÕES
 # -----------------------------------------------------------------------------
 if not API_KEY_OPENAI:
     st.error("❌ A chave 'OPENAI_API_KEY' não foi encontrada!")
@@ -92,48 +91,6 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     except Exception as e:
         st.sidebar.warning(f"⚠️ Supabase offline: {e}")
-
-
-def enviar_whatsapp(numero, mensagem):
-    """Envia mensagem no WhatsApp via Evolution API"""
-    url = get_secret("WHATSAPP_API_URL")
-    token = get_secret("WHATSAPP_API_TOKEN")
-    
-    if not url or not numero:
-        return False
-        
-    numero_limpo = "".join(c for c in str(numero) if c.isdigit())
-    if not numero_limpo.startswith("55") and len(numero_limpo) <= 11:
-        numero_limpo = "55" + numero_limpo
-        
-    payload = {
-        "number": numero_limpo,
-        "text": mensagem
-    }
-    
-    try:
-        req = urllib.request.Request(url, method="POST")
-        req.add_header('Content-Type', 'application/json')
-        if token:
-            req.add_header('apikey', token)
-            
-        data = json.dumps(payload).encode('utf-8')
-        urllib.request.urlopen(req, data=data, timeout=5)
-        return True
-    except Exception as e:
-        print(f"Erro ao enviar WhatsApp: {e}")
-        return False
-
-
-def extrair_telefone(solicitante_str):
-    """Extrai o número do WhatsApp de dentro da string do solicitante."""
-    try:
-        if "[WA:" in solicitante_str:
-            return solicitante_str.split("[WA:")[1].split("]")[0].strip()
-    except Exception:
-        pass
-    return ""
-
 
 # -----------------------------------------------------------------------------
 # 4. FUNÇÕES AUXILIARES
@@ -891,13 +848,7 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
             supabase.table("solicitacoes_compras").insert(payload_fallback).execute()
 
     enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet)
-    
-    num_adm = get_secret("WHATSAPP_ADM_NUMERO")
-    if num_adm:
-        msg_adm = f"🚨 *Novo Pedido de Compra*\n\n*Solicitante:* {solicitante}\n*Item:* {descricao}\n*Qtd:* {quantidade}\n*Motivo:* {motivo}"
-        enviar_whatsapp(num_adm, msg_adm)
-        
-    return {"sucesso": True, "mensagem": "Item registrado e notificações enviadas!"}
+    return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
 
 
 tools = [
@@ -978,14 +929,13 @@ if not st.session_state.autenticado:
             nome_user = st.text_input("Seu Nome Completo:")
             setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Manutenção, Frota, Compras...")
             filial_user = st.selectbox("Unidade / Filial:", ["Arco - São Paulo", "Ultrassom - São Paulo", "Outra"])
-            telefone_user = st.text_input("Seu WhatsApp (com DDD):", placeholder="Ex: 11988887777")
             btn_entrar = st.form_submit_button("🚀 Iniciar Atendimento")
 
             if btn_entrar:
-                if not nome_user.strip() or not setor_user.strip() or not telefone_user.strip():
-                    st.error("⚠️ Por favor, preencha todos os campos, incluindo seu WhatsApp para receber notificações!")
+                if not nome_user.strip() or not setor_user.strip():
+                    st.error("⚠️ Por favor, preencha seu nome e setor!")
                 else:
-                    st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user}) [WA: {telefone_user}]"
+                    st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user})"
                     st.session_state.autenticado = True
                     st.session_state.is_adm = False
                     st.session_state.is_estoque = False
@@ -1197,10 +1147,6 @@ if aba_estoque:
                                         "lead_time_dias": lead_time,
                                         "otif_ok": otif,
                                     }).execute()
-                                    
-                                    tel = extrair_telefone(solic)
-                                    msg_wa = f"✅ *Pedido Entregue!*\n\nSeu pedido de *{desc}* acabou de ser recebido e conferido pelo nosso Estoque."
-                                    enviar_whatsapp(tel, msg_wa)
 
                                     st.success("🏁 Recebimento registrado com sucesso e pedido finalizado!")
                                     st.rerun()
@@ -1876,7 +1822,6 @@ if aba_gestao:
                                                             "data_prometida": f_dt_prometida_input.isoformat(),
                                                         }
                                                         
-                                                        # Lógica Inteligente de Status para não estragar pedidos que já avançaram
                                                         if status_atual == "Pendente":
                                                             update_payload["status"] = "Aguardando entrega"
                                                         elif status_atual == "Aguardando NF" and uploaded_nf:
@@ -1916,30 +1861,15 @@ if aba_gestao:
                                             if forn_auto:
                                                 payload_up["fornecedor_vencedor"] = forn_auto
                                         supabase.table("solicitacoes_compras").update(payload_up).eq("id", item_id).execute()
-                                        
-                                        tel = extrair_telefone(solic)
-                                        msg_wa = f"🚚 *Atualização de Pedido*\n\nSeu pedido de *{desc}* foi aprovado pelo setor de Compras e agora está *Aguardando Entrega*."
-                                        enviar_whatsapp(tel, msg_wa)
-                                        
                                         st.rerun()
                                 with col2:
                                     if st.button("📄 Ag. NF", key=f"ped_nf_{item_id}", use_container_width=True):
                                         supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
-                                        
-                                        tel = extrair_telefone(solic)
-                                        msg_wa = f"📄 *Atualização de Pedido*\n\nSeu pedido de *{desc}* está com status *Aguardando Nota Fiscal*."
-                                        enviar_whatsapp(tel, msg_wa)
-                                        
                                         st.rerun()
                                 with col3:
                                     if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
                                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                                         supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
-                                        
-                                        tel = extrair_telefone(solic)
-                                        msg_wa = f"❌ *Pedido Recusado*\n\nInfelizmente, seu pedido de *{desc}* foi recusado pela administração."
-                                        enviar_whatsapp(tel, msg_wa)
-                                        
                                         st.rerun()
                             else:
                                 with col1:
