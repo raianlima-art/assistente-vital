@@ -8,6 +8,7 @@ import json
 import os
 import smtplib
 import unicodedata
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
@@ -77,7 +78,7 @@ def carregar_css(caminho="style.css"):
 carregar_css()
 
 # -----------------------------------------------------------------------------
-# 3. INICIALIZAÇÃO DE CONEXÕES
+# 3. INICIALIZAÇÃO DE CONEXÕES E WHATSAPP
 # -----------------------------------------------------------------------------
 if not API_KEY_OPENAI:
     st.error("❌ A chave 'OPENAI_API_KEY' não foi encontrada!")
@@ -92,6 +93,48 @@ if SUPABASE_URL and SUPABASE_KEY and "seu-projeto" not in SUPABASE_URL:
     except Exception as e:
         st.sidebar.warning(f"⚠️ Supabase offline: {e}")
 
+
+def enviar_whatsapp(numero, mensagem):
+    """Envia mensagem no WhatsApp via Evolution API"""
+    url = get_secret("WHATSAPP_API_URL")
+    token = get_secret("WHATSAPP_API_TOKEN")
+    
+    if not url or not numero:
+        return False
+        
+    numero_limpo = "".join(c for c in str(numero) if c.isdigit())
+    if not numero_limpo.startswith("55") and len(numero_limpo) <= 11:
+        numero_limpo = "55" + numero_limpo
+        
+    payload = {
+        "number": numero_limpo,
+        "text": mensagem
+    }
+    
+    try:
+        req = urllib.request.Request(url, method="POST")
+        req.add_header('Content-Type', 'application/json')
+        if token:
+            req.add_header('apikey', token)
+            
+        data = json.dumps(payload).encode('utf-8')
+        urllib.request.urlopen(req, data=data, timeout=5)
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar WhatsApp: {e}")
+        return False
+
+
+def extrair_telefone(solicitante_str):
+    """Extrai o número do WhatsApp de dentro da string do solicitante."""
+    try:
+        if "[WA:" in solicitante_str:
+            return solicitante_str.split("[WA:")[1].split("]")[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
 # -----------------------------------------------------------------------------
 # 4. FUNÇÕES AUXILIARES
 # -----------------------------------------------------------------------------
@@ -103,27 +146,18 @@ def normalizar_texto(texto):
 
 
 def extrair_nome_fornecedor(url):
-    """Identifica automaticamente o nome do fornecedor/loja através da URL do produto."""
     if not url or not isinstance(url, str) or url == "#" or not url.strip():
         return ""
     
     u = url.lower().strip()
-    if "mercadolivre" in u or "mercadolibre" in u:
-        return "Mercado Livre"
-    if "aliexpress" in u:
-        return "AliExpress"
-    if "amazon" in u:
-        return "Amazon"
-    if "shopee" in u:
-        return "Shopee"
-    if "kabum" in u:
-        return "KaBuM!"
-    if "magazineluiza" in u or "magalu" in u:
-        return "Magalu"
-    if "lojadomecanico" in u:
-        return "Loja do Mecânico"
-    if "alibaba" in u:
-        return "Alibaba"
+    if "mercadolivre" in u or "mercadolibre" in u: return "Mercado Livre"
+    if "aliexpress" in u: return "AliExpress"
+    if "amazon" in u: return "Amazon"
+    if "shopee" in u: return "Shopee"
+    if "kabum" in u: return "KaBuM!"
+    if "magazineluiza" in u or "magalu" in u: return "Magalu"
+    if "lojadomecanico" in u: return "Loja do Mecânico"
+    if "alibaba" in u: return "Alibaba"
     
     try:
         if not u.startswith(("http://", "https://")):
@@ -857,7 +891,13 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
             supabase.table("solicitacoes_compras").insert(payload_fallback).execute()
 
     enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet)
-    return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
+    
+    num_adm = get_secret("WHATSAPP_ADM_NUMERO")
+    if num_adm:
+        msg_adm = f"🚨 *Novo Pedido de Compra*\n\n*Solicitante:* {solicitante}\n*Item:* {descricao}\n*Qtd:* {quantidade}\n*Motivo:* {motivo}"
+        enviar_whatsapp(num_adm, msg_adm)
+        
+    return {"sucesso": True, "mensagem": "Item registrado e notificações enviadas!"}
 
 
 tools = [
@@ -938,13 +978,14 @@ if not st.session_state.autenticado:
             nome_user = st.text_input("Seu Nome Completo:")
             setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Manutenção, Frota, Compras...")
             filial_user = st.selectbox("Unidade / Filial:", ["Arco - São Paulo", "Ultrassom - São Paulo", "Outra"])
+            telefone_user = st.text_input("Seu WhatsApp (com DDD):", placeholder="Ex: 11988887777")
             btn_entrar = st.form_submit_button("🚀 Iniciar Atendimento")
 
             if btn_entrar:
-                if not nome_user.strip() or not setor_user.strip():
-                    st.error("⚠️ Por favor, preencha seu nome e setor!")
+                if not nome_user.strip() or not setor_user.strip() or not telefone_user.strip():
+                    st.error("⚠️ Por favor, preencha todos os campos, incluindo seu WhatsApp para receber notificações!")
                 else:
-                    st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user})"
+                    st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user}) [WA: {telefone_user}]"
                     st.session_state.autenticado = True
                     st.session_state.is_adm = False
                     st.session_state.is_estoque = False
@@ -1156,6 +1197,10 @@ if aba_estoque:
                                         "lead_time_dias": lead_time,
                                         "otif_ok": otif,
                                     }).execute()
+                                    
+                                    tel = extrair_telefone(solic)
+                                    msg_wa = f"✅ *Pedido Entregue!*\n\nSeu pedido de *{desc}* acabou de ser recebido e conferido pelo nosso Estoque."
+                                    enviar_whatsapp(tel, msg_wa)
 
                                     st.success("🏁 Recebimento registrado com sucesso e pedido finalizado!")
                                     st.rerun()
@@ -1768,42 +1813,97 @@ if aba_gestao:
                                             uploaded_cot_ext = st.file_uploader("PDF Cotação / Orçamento Externa:", type=["pdf"], key=f"file_cot_ext_{item_id}")
                                             uploaded_nf = st.file_uploader("PDF da NF:", type=["pdf"], key=f"file_nf_{item_id}")
                                             
-                                            btn_save_nf_adm = st.form_submit_button("💾 Salvar Compra", use_container_width=True)
+                                            validar_nf_ia = st.checkbox("🤖 Validar valores da NF automaticamente com IA", value=True, key=f"chk_val_{item_id}")
+                                            
+                                            btn_save_nf_adm = st.form_submit_button("💾 Atualizar Pedido / Anexos", use_container_width=True)
 
                                             if btn_save_nf_adm:
                                                 if not num_pedido_input.strip() or not f_fornec_input.strip():
                                                     st.error("⚠️ Preencha Nº do Pedido e Fornecedor!")
                                                 else:
-                                                    update_payload = {
-                                                        "status": "Aguardando entrega",
-                                                        "numero_pedido": num_pedido_input.strip(),
-                                                        "fornecedor_vencedor": f_fornec_input.strip(),
-                                                        "data_prometida": f_dt_prometida_input.isoformat(),
-                                                    }
-                                                    
-                                                    desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
-                                                    mes_ano = datetime.datetime.now().strftime("%m-%Y")
-                                                    dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+                                                    pode_salvar = True
+                                                    bytes_nf = uploaded_nf.getvalue() if uploaded_nf else None
 
-                                                    if uploaded_cot_ext:
-                                                        if link_cotacao:
-                                                            deletar_arquivo_do_drive(link_cotacao)
-                                                        bytes_cot = uploaded_cot_ext.read()
-                                                        nome_cot = f"Cotacao_Externa_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                        link_cot_drive = salvar_nf_no_drive(bytes_cot, nome_cot, nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot])
-                                                        if link_cot_drive:
-                                                            update_payload["link_cotacao"] = link_cot_drive
+                                                    if uploaded_nf and validar_nf_ia:
+                                                        with st.spinner("🤖 Analisando a Nota Fiscal com Inteligência Artificial..."):
+                                                            try:
+                                                                import PyPDF2
+                                                                pdf_reader = PyPDF2.PdfReader(io.BytesIO(bytes_nf))
+                                                                texto_nf = "".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
+                                                                
+                                                                valor_aprovado = 0.0
+                                                                if supabase:
+                                                                    try:
+                                                                        cot_data = supabase.table("cotacoes").select("valor_comprado").eq("pedido_id", int(item_id)).execute()
+                                                                        if cot_data.data:
+                                                                            valor_aprovado = float(cot_data.data[0].get("valor_comprado", 0))
+                                                                    except Exception:
+                                                                        pass
 
-                                                    if uploaded_nf:
-                                                        bytes_data = uploaded_nf.read()
-                                                        nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
-                                                        link_drive = salvar_nf_no_drive(bytes_data, nome_arquivo, nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano])
-                                                        if link_drive:
-                                                            update_payload["link_nf"] = link_drive
+                                                                prompt = f"""
+                                                                Extraia o Valor Total exato desta Nota Fiscal.
+                                                                Retorne APENAS um JSON válido no formato exato:
+                                                                {{"valor_total_nf": 1500.50, "numero_nf": "12345"}}
+                                                                Se não encontrar, retorne 0.0 para o valor.
+                                                                Texto da NF: {texto_nf[:6000]}
+                                                                """
+                                                                
+                                                                res = client.chat.completions.create(
+                                                                    model="gpt-4o-mini",
+                                                                    response_format={"type": "json_object"},
+                                                                    messages=[{"role": "user", "content": prompt}],
+                                                                    temperature=0.0
+                                                                )
+                                                                
+                                                                dados_extraidos = json.loads(res.choices[0].message.content)
+                                                                valor_nf_lido = float(dados_extraidos.get("valor_total_nf", 0.0))
+                                                                
+                                                                if valor_aprovado > 0 and abs(valor_nf_lido - valor_aprovado) > 1.5:
+                                                                    st.error(f"🚨 **Divergência Financeira Bloqueada!**\n\nO valor lido na Nota Fiscal (**R$ {formar_real(valor_nf_lido)}**) é diferente do valor aprovado na cotação (**R$ {formar_real(valor_aprovado)}**).\n\n*Se for uma exceção aprovada, desmarque a caixa 'Validar valores da NF' e salve novamente.*")
+                                                                    pode_salvar = False
+                                                                else:
+                                                                    st.success(f"✅ NF validada pela IA com sucesso! Valor confere: R$ {formar_real(valor_nf_lido)}")
+                                                                    
+                                                            except ImportError:
+                                                                st.warning("⚠️ Instale o pacote PyPDF2 rodando 'pip install PyPDF2' no terminal para habilitar a IA nas NFs.")
+                                                            except Exception as e:
+                                                                st.warning(f"⚠️ Erro ao analisar PDF: {e}")
 
-                                                    supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
-                                                    st.success("✅ Compra e anexos salvos!")
-                                                    st.rerun()
+                                                    if pode_salvar:
+                                                        update_payload = {
+                                                            "numero_pedido": num_pedido_input.strip(),
+                                                            "fornecedor_vencedor": f_fornec_input.strip(),
+                                                            "data_prometida": f_dt_prometida_input.isoformat(),
+                                                        }
+                                                        
+                                                        # Lógica Inteligente de Status para não estragar pedidos que já avançaram
+                                                        if status_atual == "Pendente":
+                                                            update_payload["status"] = "Aguardando entrega"
+                                                        elif status_atual == "Aguardando NF" and uploaded_nf:
+                                                            update_payload["status"] = "Aguardando entrega"
+                                                        
+                                                        desc_limpa = "".join(c for c in desc[:15] if c.isalnum() or c in " -_").strip()
+                                                        mes_ano = datetime.datetime.now().strftime("%m-%Y")
+                                                        dia_cot = datetime.datetime.now().strftime("%d-%m-%Y")
+
+                                                        if uploaded_cot_ext:
+                                                            if link_cotacao:
+                                                                deletar_arquivo_do_drive(link_cotacao)
+                                                            bytes_cot = uploaded_cot_ext.read()
+                                                            nome_cot = f"Cotacao_Externa_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                                            link_cot_drive = salvar_nf_no_drive(bytes_cot, nome_cot, nome_subpasta=["Relatórios IA", "Cotações", mes_ano, dia_cot])
+                                                            if link_cot_drive:
+                                                                update_payload["link_cotacao"] = link_cot_drive
+
+                                                        if uploaded_nf:
+                                                            nome_arquivo = f"NF_Pedido_{num_pedido_input.strip()}_{item_id}_{desc_limpa}.pdf"
+                                                            link_drive = salvar_nf_no_drive(bytes_nf, nome_arquivo, nome_subpasta=["Relatórios IA", "Notas Fiscais", mes_ano])
+                                                            if link_drive:
+                                                                update_payload["link_nf"] = link_drive
+
+                                                        supabase.table("solicitacoes_compras").update(update_payload).eq("id", item_id).execute()
+                                                        st.success("✅ Compra e anexos salvos!")
+                                                        st.rerun()
 
                             col1, col2, col3 = st.columns(3)
                             
@@ -1816,15 +1916,30 @@ if aba_gestao:
                                             if forn_auto:
                                                 payload_up["fornecedor_vencedor"] = forn_auto
                                         supabase.table("solicitacoes_compras").update(payload_up).eq("id", item_id).execute()
+                                        
+                                        tel = extrair_telefone(solic)
+                                        msg_wa = f"🚚 *Atualização de Pedido*\n\nSeu pedido de *{desc}* foi aprovado pelo setor de Compras e agora está *Aguardando Entrega*."
+                                        enviar_whatsapp(tel, msg_wa)
+                                        
                                         st.rerun()
                                 with col2:
                                     if st.button("📄 Ag. NF", key=f"ped_nf_{item_id}", use_container_width=True):
                                         supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
+                                        
+                                        tel = extrair_telefone(solic)
+                                        msg_wa = f"📄 *Atualização de Pedido*\n\nSeu pedido de *{desc}* está com status *Aguardando Nota Fiscal*."
+                                        enviar_whatsapp(tel, msg_wa)
+                                        
                                         st.rerun()
                                 with col3:
                                     if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
                                         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
                                         supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
+                                        
+                                        tel = extrair_telefone(solic)
+                                        msg_wa = f"❌ *Pedido Recusado*\n\nInfelizmente, seu pedido de *{desc}* foi recusado pela administração."
+                                        enviar_whatsapp(tel, msg_wa)
+                                        
                                         st.rerun()
                             else:
                                 with col1:
