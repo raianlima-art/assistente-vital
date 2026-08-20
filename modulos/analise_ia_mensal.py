@@ -46,7 +46,6 @@ def render_card_kpi(titulo, valor, indicador=None):
     if indicador:
         badge_html = f'<span style="font-size: 0.7rem; color: #15803d; font-weight: 600; background: #f0fdf4; padding: 2px 6px; border-radius: 4px; border: 1px solid #bbf7d0;">↑ {indicador}</span>'
 
-    # String HTML em linha única para não gerar bloco de código por indentação no Markdown
     return f'<div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; min-height: 68px; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box;"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;"><span style="font-size: 0.7rem; color: #64748b; font-weight: 600; text-transform: uppercase;">{titulo}</span>{badge_html}</div><div style="font-size: 1.05rem; color: #0f172a; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{valor}</div></div>'
 
 
@@ -81,10 +80,22 @@ def iniciar():
         mes_nome = mes_sel.split(" - ")[1]
 
         try:
+            # 1. Filtra apenas pedidos em status de compra aprovada/ativa (Aguardando entrega, Aguardando NF ou Finalizado)
+            resp_compras = (
+                supabase.table("solicitacoes_compras")
+                .select("id")
+                .in_("status", ["Aguardando entrega", "Aguardando NF", "Finalizado"])
+                .execute()
+                .data
+            ) or []
+            ids_comprados = set(str(item["id"]) for item in resp_compras)
+
+            # 2. Busca cotações do mês e considera apenas as dos pedidos aprovados
             res_cot = supabase.table("cotacoes").select("*").execute().data or []
             dados_mes = [
                 c for c in res_cot
                 if str(c.get("data_cotacao", "")).startswith(f"{ano_sel}-{mes_num}")
+                and (c.get("pedido_id") is None or str(c.get("pedido_id")) in ids_comprados)
             ]
         except Exception:
             dados_mes = []
