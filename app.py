@@ -1806,24 +1806,42 @@ if aba_gestao:
                                                     st.rerun()
 
                             col1, col2, col3 = st.columns(3)
-                            with col1:
-                                if st.button("🚚 Ag. Entrega", key=f"entreg_{item_id}", use_container_width=True):
-                                    payload_up = {"status": "Aguardando entrega"}
-                                    if not fornecedor:
-                                        forn_auto = extrair_nome_fornecedor(link)
-                                        if forn_auto:
-                                            payload_up["fornecedor_vencedor"] = forn_auto
-                                    supabase.table("solicitacoes_compras").update(payload_up).eq("id", item_id).execute()
-                                    st.rerun()
-                            with col2:
-                                if st.button("📄 Ag. NF", key=f"ped_nf_{item_id}", use_container_width=True):
-                                    supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
-                                    st.rerun()
-                            with col3:
-                                if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
-                                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                                    supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
-                                    st.rerun()
+                            
+                            if status_atual == "Pendente":
+                                with col1:
+                                    if st.button("🚚 Ag. Entrega", key=f"entreg_{item_id}", use_container_width=True):
+                                        payload_up = {"status": "Aguardando entrega"}
+                                        if not fornecedor:
+                                            forn_auto = extrair_nome_fornecedor(link)
+                                            if forn_auto:
+                                                payload_up["fornecedor_vencedor"] = forn_auto
+                                        supabase.table("solicitacoes_compras").update(payload_up).eq("id", item_id).execute()
+                                        st.rerun()
+                                with col2:
+                                    if st.button("📄 Ag. NF", key=f"ped_nf_{item_id}", use_container_width=True):
+                                        supabase.table("solicitacoes_compras").update({"status": "Aguardando NF"}).eq("id", item_id).execute()
+                                        st.rerun()
+                                with col3:
+                                    if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
+                                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                        supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
+                                        st.rerun()
+                            else:
+                                with col1:
+                                    if st.button("⏳ Voltar p/ Pendente", key=f"pend_{item_id}", use_container_width=True):
+                                        supabase.table("solicitacoes_compras").update({"status": "Pendente"}).eq("id", item_id).execute()
+                                        st.rerun()
+                                with col2:
+                                    novo_status = "Aguardando NF" if status_atual == "Aguardando entrega" else "Aguardando entrega"
+                                    rotulo = "📄 Ag. NF" if status_atual == "Aguardando entrega" else "🚚 Ag. Entrega"
+                                    if st.button(rotulo, key=f"alt_st_{item_id}", use_container_width=True):
+                                        supabase.table("solicitacoes_compras").update({"status": novo_status}).eq("id", item_id).execute()
+                                        st.rerun()
+                                with col3:
+                                    if st.button("❌ Recusar", key=f"rec_{item_id}", use_container_width=True):
+                                        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                                        supabase.table("solicitacoes_compras").update({"status": "Recusado", "data_finalizacao": now_iso}).eq("id", item_id).execute()
+                                        st.rerun()
 
                         st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 

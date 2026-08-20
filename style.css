@@ -105,7 +105,7 @@ html, body, [class*="css"] {
     border-top: 1px solid #f1f5f9 !important;
 }
 
-/* --- BOTÕES FLAT MINIMALISTAS (100% RETOS / PÍLULA LISO) --- */
+/* --- BOTÕES FLAT MINIMALISTAS PADRONIZADOS --- */
 div.stButton, div.stFormSubmitButton {
     width: 100% !important;
 }
@@ -115,14 +115,14 @@ div.stFormSubmitButton > button:first-child {
     background-color: #2563eb !important;
     color: #ffffff !important;
     border: 1px solid transparent !important;
-    border-radius: 50px !important; /* Formato Pílula Flat */
+    border-radius: 50px !important;
     padding: 0.5rem 1rem !important;
     font-weight: 500 !important;
     font-size: 0.85rem !important;
     letter-spacing: 0.01em !important;
-    box-shadow: none !important; /* Zero sombras 3D */
+    box-shadow: none !important;
     width: 100% !important;
-    min-height: 40px !important;
+    min-height: 42px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -158,6 +158,18 @@ div.stFormSubmitButton > button:first-child:active {
 .stTextInput input:focus, .stNumberInput input:focus, .stSelectbox > div > div:focus-within {
     border-color: #2563eb !important;
     box-shadow: none !important;
+}
+
+/* --- MÉTRICAS (AJUSTE CONTRA CORTE DE VALORES) --- */
+[data-testid="stMetricValue"] {
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    color: #0f172a !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.75rem !important;
+    color: #64748b !important;
 }
 
 /* --- BARRA LATERAL (SIDEBAR) --- */
