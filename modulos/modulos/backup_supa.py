@@ -36,13 +36,12 @@ def obter_ou_criar_subpasta(service, parent_id, nome_pasta):
         pasta = service.files().create(body=meta, fields="id", supportsAllDrives=True).execute()
         return pasta.get("id")
 
-def render_backup_supa():
+def iniciar():
     with st.expander("💾 Backup do Banco Supabase para o Google Drive"):
         st.caption("Exporta todas as tabelas principais do Supabase em formato JSON e salva no Drive.")
         
         if st.button("🚀 Gerar e Enviar Backup Agora", use_container_width=True):
             try:
-                # 1. Conexão Supabase
                 supabase_url = os.getenv("SUPABASE_URL")
                 supabase_key = os.getenv("SUPABASE_KEY")
                 if not supabase_url or not supabase_key:
@@ -50,15 +49,13 @@ def render_backup_supa():
                     return
 
                 supabase = create_client(supabase_url, supabase_key)
-                
-                # 2. Conexão Google Drive
                 service, root_folder_id = obter_servico_drive()
+                
                 if not service:
-                    st.error("❌ Não foi possível conectar ao Google Drive (verifique credentials.json).")
+                    st.error("❌ Não foi possível conectar ao Google Drive.")
                     return
 
                 with st.spinner("Extraindo dados do Supabase..."):
-                    # Tabelas que serão salvas no backup
                     tabelas = ["solicitacoes_compras", "fechamento_mensal"]
                     dados_backup = {}
 
@@ -69,16 +66,13 @@ def render_backup_supa():
                         except Exception:
                             dados_backup[tab] = []
 
-                    # Prepara o arquivo JSON
                     json_str = json.dumps(dados_backup, indent=4, ensure_ascii=False, default=str)
                     bytes_data = json_str.encode("utf-8")
 
-                    # Nome do arquivo com timestamp
                     data_hoje = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                     nome_arquivo = f"backup_supabase_{data_hoje}.json"
 
                 with st.spinner("Enviando para o Google Drive..."):
-                    # Cria subpasta 'Backups_Supabase' no Drive
                     pasta_backup_id = obter_ou_criar_subpasta(service, root_folder_id, "Backups_Supabase")
 
                     file_metadata = {
@@ -92,7 +86,7 @@ def render_backup_supa():
 
                     link_drive = file_uploaded.get("webViewLink")
 
-                st.success(f"✅ Backup concluído com sucesso!")
+                st.success("✅ Backup concluído com sucesso!")
                 st.markdown(f"🔗 [Acessar Arquivo no Google Drive]({link_drive})")
 
             except Exception as e:
