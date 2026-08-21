@@ -1046,7 +1046,7 @@ def gerar_pdf_cotacao_individual(desc, qtd, ref, solic, motivo, opcoes_ordenadas
     return buffer.getvalue()
 
 
-def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao=None, compativel=None, encapsulamento=None, custo_estimado=None, link_adicional=None, datasheet=None):
+def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, urgencia="Média", id_manutencao=None, compativel=None, encapsulamento=None, custo_estimado=None, link_adicional=None, datasheet=None):
     if not EMAIL_REMETENTE or not EMAIL_SENHA_APP or not EMAIL_DESTINATARIO:
         return False
 
@@ -1064,7 +1064,7 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
     msg = MIMEMultipart()
     msg["From"] = EMAIL_REMETENTE
     msg["To"] = EMAIL_DESTINATARIO
-    msg["Subject"] = f"🚨 Nova Solicitação de Compra - {solicitante}"
+    msg["Subject"] = f"🚨 Nova Solicitação de Compra - {solicitante} ({urgencia})"
 
     corpo = f"""
     <h2>🛒 Nova Solicitação de Compra Recebida!</h2>
@@ -1073,6 +1073,7 @@ def enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, so
         <li><strong>Solicitante:</strong> {solicitante}</li>
         <li><strong>Nome do item:</strong> {descricao}</li>
         <li><strong>Quantidade:</strong> {quantidade} un.</li>
+        <li><strong>Nível de Urgência:</strong> {urgencia}</li>
         <li><strong>Detalhe:</strong> {referencia} (<a href="{link}">Ver Produto</a>)</li>
         <li><strong>Motivo:</strong> {motivo}</li>
         {campos_fabiano_html}
@@ -1161,7 +1162,7 @@ def calcular_frete_ia(origem, destino, tipo_trajeto, dias_por_trecho, is_viagem_
     }
 
 
-def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao=None, compativel=None, encapsulamento=None, custo_estimado=None, link_adicional=None, datasheet=None):
+def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo, solicitante, urgencia="Média", id_manutencao=None, compativel=None, encapsulamento=None, custo_estimado=None, link_adicional=None, datasheet=None):
     if supabase:
         payload = {
             "item_descricao": descricao,
@@ -1170,6 +1171,7 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
             "quantidade": int(quantidade),
             "motivo": motivo,
             "solicitante": solicitante,
+            "urgencia": urgencia,
             "status": "Pendente",
             "id_manutencao": id_manutencao,
             "compativel": compativel,
@@ -1180,7 +1182,8 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
         }
         try:
             supabase.table("solicitacoes_compras").insert(payload).execute()
-        except Exception:
+        except Exception as e:
+            st.error(f"Erro ao salvar solicitação: {e}")
             extra_text = f" | ID Manut: {id_manutencao} | Compativel: {compativel} | Encapsulamento: {encapsulamento} | Custo Est: {custo_estimado}"
             payload_fallback = {
                 "item_descricao": f"{descricao} {extra_text}",
@@ -1189,13 +1192,13 @@ def registrar_solicitacao_compra(descricao, link, referencia, quantidade, motivo
                 "quantidade": int(quantidade),
                 "motivo": motivo,
                 "solicitante": solicitante,
+                "urgencia": urgencia,
                 "status": "Pendente",
             }
             supabase.table("solicitacoes_compras").insert(payload_fallback).execute()
 
-    enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet)
-    return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
-
+        enviar_email_notificacao(descricao, link, referencia, quantidade, motivo, solicitante, urgencia, id_manutencao, compativel, encapsulamento, custo_estimado, link_adicional, datasheet)
+        return {"sucesso": True, "mensagem": "Item registrado e e-mail enviado!"}
 
 tools = [
     {
@@ -1212,33 +1215,33 @@ tools = [
                     "dias_por_trecho": {"type": "integer"},
                     "is_viagem_curta": {"type": "boolean"},
                 },
-                "required": ["origem", "destino", "tipo_trajeto", "dias_por_trecho", "is_viagem_curta"],
-            },
-        },
+                "required": ["origem", "destino", "tipo_trajeto", "dias_por_trecho", "is_viagem_curta"]
+            }
+        }
     },
     {
         "type": "function",
         "function": {
             "name": "registrar_solicitacao_compra",
-            "description": "Registra um pedido de compra no sistema.",
+            "description": "Registra uma nova solicitação de compra de material ou equipamento.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "descricao": {"type": "string", "description": "Nome resumido do produto"},
-                    "link": {"type": "string", "description": "URL/Link do produto"},
-                    "referencia": {"type": "string", "description": "Modelo, código ou especificação"},
-                    "quantidade": {"type": "integer", "description": "Quantidade de items"},
-                    "motivo": {"type": "string", "description": "Motivo da compra"},
-                    "id_manutencao": {"type": "string"},
-                    "compativel": {"type": "string"},
-                    "encapsulamento": {"type": "string"},
-                    "custo_estimado": {"type": "string"},
-                    "link_adicional": {"type": "string"},
-                    "datasheet": {"type": "string"},
+                    "descricao": {"type": "string", "description": "Descrição detalhada do item"},
+                    "link": {"type": "string", "description": "Link do produto ou loja"},
+                    "referencia": {"type": "string", "description": "Código de referência/modelo"},
+                    "quantidade": {"type": "integer", "description": "Quantidade desejada"},
+                    "motivo": {"type": "string", "description": "Motivo/justificativa da compra"},
+                    "solicitante": {"type": "string", "description": "Nome do solicitante"},
+                    "urgencia": {
+                        "type": "string",
+                        "enum": ["Baixa", "Média", "Alta", "Crítica"],
+                        "description": "Nível de urgência do pedido"
+                    }
                 },
-                "required": ["descricao", "link", "referencia", "quantidade", "motivo"],
-            },
-        },
+                "required": ["descricao", "quantidade", "motivo", "solicitante", "urgencia"]
+            }
+        }
     },
     {
         "type": "function",
@@ -1251,7 +1254,7 @@ tools = [
                     "numero_os": {"type": "string", "description": "Número ou código da Ordem de Serviço"},
                     "tipo_servico": {
                         "type": "string",
-                        "description": "Tipo do serviço (ex: Manutenção Corretiva - Vital, Preventiva, Service Cliente, Mau Uso, Contrato, Checklist)"
+                        "description": "Tipo do serviço (ex: Manutenção Corretiva - Vital, Preventiva, Service Cliente, Mau Uso, Contrat)"
                     },
                     "complexidade": {
                         "type": "string",
@@ -2113,6 +2116,7 @@ Suas atribuições principais são:
      2. Código de Referência / Modelo
      3. Quantidade
      4. Motivo da compra
+     5. Nível de Urgência (Baixa, Média, Alta, Crítica)
 
 3. REGISTRAR ATENDIMENTOS DE OS: Quando o técnico informar que concluiu uma Ordem de Serviço, extraia:
    - Número da OS
@@ -2213,6 +2217,7 @@ Seja cortês, profissional e objetivo.
                                 quantidade=args.get("quantidade"),
                                 motivo=args.get("motivo"),
                                 solicitante=solicitante_atual,
+                                urgencia=args.get("urgencia", "Média"),
                                 id_manutencao=args.get("id_manutencao"),
                                 compativel=args.get("compativel"),
                                 encapsulamento=args.get("encapsulamento"),
@@ -2242,6 +2247,7 @@ Seja cortês, profissional e objetivo.
                                     f'<div><b>👤 Solicitante:</b> {solicitante_atual}</div>'
                                     f'<div><b>📦 Nome do item:</b> {args.get("descricao")}</div>'
                                     f'<div><b>🔢 Quantidade:</b> {args.get("quantidade")} un.</div>'
+                                    f'<div><b>🚨 Urgência:</b> {args.get("urgencia", "Média")}</div>'
                                     f'<div><b>📋 Detalhe:</b> {args.get("referencia")}{link_html}</div>'
                                     f'<div><b>🎯 Motivo:</b> {args.get("motivo")}</div>'
                                     f'{extra_info}'
@@ -2426,6 +2432,7 @@ if aba_gestao:
                     with c_f1:
                         f_qtd = st.number_input("Quantidade:", min_value=1, value=1)
                         f_ref = st.text_input("Referência / Modelo:")
+                        f_urgencia = st.selectbox("Nível de Urgência:", ["Baixa", "Média", "Alta", "Crítica"], index=1)
                     with c_f2:
                         f_link = st.text_input("Link do Produto:")
                         f_motivo = st.text_input("Motivo da Compra:")
@@ -2454,6 +2461,7 @@ if aba_gestao:
                                 quantidade=f_qtd,
                                 motivo=f_motivo or "N/A",
                                 solicitante=f_solic,
+                                urgencia=f_urgencia,
                                 id_manutencao=f_id_manut,
                                 compativel=f_compat,
                                 encapsulamento=f_encaps,
@@ -2528,6 +2536,7 @@ if aba_gestao:
                         ref = item.get("referencia", "N/A")
                         motivo = item.get("motivo", "N/A")
                         solic = item.get("solicitante", "N/A")
+                        urg_item = item.get("urgencia", "Média")
                         link = item.get("link_produto", "#")
                         status_atual = item.get("status", "Pendente")
                         link_nf = item.get("link_nf")
@@ -2572,7 +2581,7 @@ if aba_gestao:
                         card_html = f"""
                         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid {cor_borda}; padding: 10px 14px; border-radius: 8px; margin-bottom: 6px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                                <span style="font-weight: 600; font-size: 0.925rem; color: #0f172a;">📦 {desc} <span style="font-weight: 400; color: #64748b; font-size: 0.825rem;">({qtd} un.)</span></span>
+                                <span style="font-weight: 600; font-size: 0.925rem; color: #0f172a;">📦 {desc} <span style="font-weight: 400; color: #64748b; font-size: 0.825rem;">({qtd} un. - Urgência: {urg_item})</span></span>
                                 <span style="background: {cor_borda}; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">{status_atual}</span>
                             </div>
                             <div style="font-size: 0.8rem; color: #475569; margin-bottom: 4px;">

@@ -1,4 +1,6 @@
 import os
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 from openai import OpenAI
 from supabase import create_client
@@ -40,19 +42,32 @@ def iniciar():
             st.error("❌ Conexão com Supabase indisponível.")
             return
 
-        # 1. Busca dados de desempenho de fornecedores
+        # 1. Busca dados operacionais
         try:
-            dados = supabase.table("desempenho_fornecedores").select("*").execute().data or []
+            res_desemp = supabase.table("desempenho_fornecedores").select("*").execute()
+            res_compras = supabase.table("solicitacoes_compras").select("*").execute()
+
+            dados = res_desemp.data or []
+            df_compras = pd.DataFrame(res_compras.data or [])
         except Exception:
             dados = []
+            df_compras = pd.DataFrame()
 
+        # 2. Métricas dos Cards
         total_pedidos = len(dados)
-        lead_time_medio = sum(float(d.get("lead_time_dias", 0) or 0) for d in dados) / total_pedidos if total_pedidos > 0 else 0.0
+        lead_time_medio = (
+            sum(float(d.get("lead_time_dias", 0) or 0) for d in dados) / total_pedidos
+            if total_pedidos > 0
+            else 0.0
+        )
         otif_ok_count = sum(1 for d in dados if d.get("otif_ok"))
         otif_pct = (otif_ok_count / total_pedidos * 100) if total_pedidos > 0 else 100.0
-        prazo_medio_pagto = int(sum(float(d.get("prazo_pagamento_dias", 0) or 0) for d in dados) / total_pedidos) if total_pedidos > 0 else 16
+        prazo_medio_pagto = (
+            int(sum(float(d.get("prazo_pagamento_dias", 0) or 0) for d in dados) / total_pedidos)
+            if total_pedidos > 0
+            else 16
+        )
 
-        # Exibição dos cards idênticos à sua tela
         c1, c2, c3 = st.columns(3)
         c1.metric("⏱️ Lead Time Médio", f"{lead_time_medio:.1f} dias")
         c2.metric("🎯 OTIF / Qualidade", f"{otif_pct:.1f}%")
@@ -60,7 +75,50 @@ def iniciar():
 
         st.divider()
 
-        # Botão para gerar parecer
+        # 3. Gráfico Elegante e Limpo: Pedidos por Solicitante
+        st.markdown("#### 👤 Volume de Pedidos por Solicitante")
+        
+        if not df_compras.empty and "solicitante" in df_compras.columns:
+            df_solic = (
+                df_compras["solicitante"]
+                .value_counts()
+                .reset_index()
+            )
+            df_solic.columns = ["Solicitante", "Quantidade"]
+            
+            # Limita aos 8 principais para manter o visual limpo
+            if len(df_solic) > 8:
+                df_solic = df_solic.head(8)
+
+            fig_barras = px.bar(
+                df_solic,
+                x="Quantidade",
+                y="Solicitante",
+                orientation="h",
+                text="Quantidade",
+                color_discrete_sequence=["#2563eb"],
+            )
+            
+            fig_barras.update_traces(
+                textposition="outside",
+                cliponaxis=False
+            )
+            fig_barras.update_layout(
+                margin=dict(l=10, r=40, t=10, b=10),
+                height=320,
+                xaxis_title="Total de Solicitações",
+                yaxis_title=None,
+                yaxis=dict(autorange="reversed"),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            st.plotly_chart(fig_barras, use_container_width=True)
+        else:
+            st.caption("Sem solicitações suficientes para gerar o gráfico.")
+
+        st.divider()
+
+        # 4. Diagnóstico com IA
         if st.button("💡 Gerar Oportunidades de Melhoria com IA", use_container_width=True, key="btn_kpi_ia"):
             if not openai_client:
                 st.error("❌ Chave da OpenAI não configurada.")
@@ -83,7 +141,7 @@ def iniciar():
                     "lead_time_medio_dias": lead_time_medio,
                     "otif_qualidade_porcentagem": otif_pct,
                     "prazo_medio_pagamento_dias": prazo_medio_pagto,
-                    "total_pedidos_avaliados": total_pedidos
+                    "total_pedidos_avaliados": total_pedidos,
                 }
 
                 try:
@@ -91,9 +149,9 @@ def iniciar():
                         model="gpt-4o-mini",
                         messages=[
                             {"role": "system", "content": prompt_system},
-                            {"role": "user", "content": f"KPIs Atuais: {dados_kpi}"}
+                            {"role": "user", "content": f"KPIs Atuais: {dados_kpi}"},
                         ],
-                        temperature=0.3
+                        temperature=0.3,
                     )
 
                     st.markdown("#### 🚀 Diagnóstico & Oportunidades de Melhoria")
