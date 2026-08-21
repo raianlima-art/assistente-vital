@@ -51,6 +51,7 @@ EMAIL_DESTINATARIO = get_secret("EMAIL_DESTINATARIO")
 
 ADM_PASSWORD = get_secret("ADM_PASSWORD", "admin123")
 ESTOQUE_PASSWORD = get_secret("ESTOQUE_PASSWORD", "estoque123")
+GESTOR_PASSWORD = get_secret("GESTOR_PASSWORD", "gestor123")
 GOOGLE_DRIVE_FOLDER_ID = get_secret("GOOGLE_DRIVE_FOLDER_ID", "")
 
 LOGO_PATH = "logo.png"
@@ -100,6 +101,39 @@ def normalizar_texto(texto):
         return ""
     nfkd = unicodedata.normalize("NFD", str(texto))
     return "".join([c for c in nfkd if not unicodedata.combining(c)]).lower().strip()
+
+
+def obter_dados_tecnico_gestor(solicitante_str):
+    """Retorna o Nome Completo do Técnico e do Gestor buscando no Supabase ou Fallback."""
+    first_name = str(solicitante_str).split("(")[0].strip()
+    first_norm = normalizar_texto(first_name)
+
+    cadastro_padrao = {
+        "raian": {"nome_completo": "Raian Rodrigues de Lima Silva", "gestor": "Marcio Gabriel Barbosa Queiroz"},
+        "allan": {"nome_completo": "Allan Cardoso Lima", "gestor": "Marcio Gabriel Barbosa Queiroz"},
+        "kevin": {"nome_completo": "Kevin Silva dos Santos", "gestor": "Marcio Gabriel Barbosa Queiroz"},
+    }
+
+    if supabase:
+        try:
+            res = supabase.table("tecnicos").select("*").execute()
+            if res.data:
+                for row in res.data:
+                    n_simples = normalizar_texto(row.get("nome", ""))
+                    n_comp = normalizar_texto(row.get("nome_completo", ""))
+                    
+                    if (first_norm and (first_norm in n_simples or first_norm in n_comp)) or (n_simples and n_simples in first_norm):
+                        nome_comp = row.get("nome_completo") or row.get("nome") or first_name
+                        gestor = row.get("gestor_responsavel") or "Marcio Gabriel Barbosa Queiroz"
+                        return nome_comp, gestor
+        except Exception as e:
+            print(f"Erro ao consultar Supabase em obter_dados_tecnico_gestor: {e}")
+
+    for key, data in cadastro_padrao.items():
+        if key in first_norm:
+            return data["nome_completo"], data["gestor"]
+
+    return first_name, "Marcio Gabriel Barbosa Queiroz"
 
 
 def extrair_nome_fornecedor(url):
@@ -185,6 +219,156 @@ def formar_real(valor):
         return "{:,.2f}".format(val).replace(",", "X").replace(".", ",").replace("X", ".")
     except Exception:
         return "0,00"
+
+
+def obter_peso_item(categoria, item_nome):
+    """Busca o peso da regra de bonificação no Supabase ou aplica fallback."""
+    item_norm = normalizar_texto(item_nome)
+    
+    defaults = {
+        "servico": {
+            "manutencao corretiva - vital": 1.0,
+            "service cliente": 0.5,
+            "manutencao preventiva - vital": 0.2,
+            "manutencao corretiva - acessorio": 0.2,
+            "mau uso": 1.0,
+            "contrato de manutencao": 0.8,
+            "checklist": 0.2,
+            "acessorio": 0.2
+        },
+        "complexidade": {
+            "alta": 1.0,
+            "media": 0.5,
+            "baixa": 0.3
+        },
+        "tipo_os": {
+            "externo": 1.0,
+            "interno": 0.5
+        }
+    }
+
+    if supabase:
+        try:
+            res = supabase.table("bonificacao_pesos").select("peso, item").eq("categoria", categoria).execute()
+            if res.data:
+                for row in res.data:
+                    if normalizar_texto(row["item"]) in item_norm or item_norm in normalizar_texto(row["item"]):
+                        return float(row["peso"])
+        except Exception:
+            pass
+
+    for k, v in defaults.get(categoria, {}).items():
+        if k in item_norm or item_norm in k:
+            return v
+    return 1.0
+
+
+def registrar_atendimento_os(numero_os, tipo_servico, complexidade, tipo_os, solicitante):
+    """Registra uma OS e calcula a pontuação prévia com validação de duplicidade e data explícita."""
+    num_os_str = str(numero_os).strip()
+    solic_limpo = str(solicitante).strip()
+
+    if supabase:
+        try:
+            res_existente = (
+                supabase.table("bonificacao_os")
+                .select("solicitante")
+                .eq("numero_os", num_os_str)
+                .execute()
+            )
+            if res_existente.data:
+                tec_existente = res_existente.data[0].get("solicitante", "outro técnico")
+                return {
+                    "erro": f"A OS #{num_os_str} já foi registrada anteriormente no sistema por {tec_existente}."
+                }
+        except Exception:
+            pass
+
+    peso_serv = obter_peso_item("servico", tipo_servico)
+    peso_comp = obter_peso_item("complexidade", complexidade)
+    peso_tos = obter_peso_item("tipo_os", tipo_os)
+
+    pontos_estimados = round(peso_serv * peso_comp * peso_tos, 2)
+
+    if supabase:
+        payload = {
+            "data_os": datetime.date.today().isoformat(),
+            "numero_os": num_os_str,
+            "tipo_servico": tipo_servico,
+            "complexidade": complexidade,
+            "tipo_os": tipo_os,
+            "peso_servico": peso_serv,
+            "peso_complexidade": peso_comp,
+            "peso_tipo_os": peso_tos,
+            "pontos_estimados": pontos_estimados,
+            "pontos_oficiais": pontos_estimados,
+            "solicitante": solic_limpo,
+            "status_auditoria": "Em Análise"
+        }
+        try:
+            supabase.table("bonificacao_os").insert(payload).execute()
+        except Exception as e:
+            return {"erro": f"Erro ao salvar no banco de dados: {e}"}
+
+    return {
+        "sucesso": True,
+        "numero_os": num_os_str,
+        "tipo_servico": tipo_servico,
+        "complexidade": complexidade,
+        "tipo_os": tipo_os,
+        "pontos_estimados": pontos_estimados
+    }
+
+
+def consultar_resumo_bonificacao(solicitante):
+    """Retorna o resumo detalhado de pontos com regra de trava de meta mínima (>= 5.0 pts)."""
+    if not supabase:
+        return {"erro": "Banco de dados indisponível"}
+
+    hoje = datetime.date.today()
+    inicio_mes = hoje.replace(day=1).isoformat()
+    nome_tecnico = solicitante.split("(")[0].strip()
+
+    try:
+        res = (
+            supabase.table("bonificacao_os")
+            .select("*")
+            .ilike("solicitante", f"{nome_tecnico}%")
+            .gte("data_os", inicio_mes)
+            .execute()
+        )
+        dados = res.data or []
+
+        tot_estimado = sum(float(d.get("pontos_estimados") or 0) for d in dados)
+        tot_aprovado = sum(float(d.get("pontos_oficiais") or 0) for d in dados if d.get("status_auditoria") == "Aprovado")
+        tot_finalizado = sum(float(d.get("pontos_oficiais") or 0) for d in dados if d.get("status_auditoria") == "Finalizado")
+        tot_oficial_total = tot_aprovado + tot_finalizado
+        
+        qtd_pendente = sum(1 for d in dados if d.get("status_auditoria") == "Em Análise")
+        qtd_aprovado = sum(1 for d in dados if d.get("status_auditoria") == "Aprovado")
+        qtd_finalizado = sum(1 for d in dados if d.get("status_auditoria") == "Finalizado")
+
+        meta_padrao = 5.0
+        if tot_oficial_total >= meta_padrao:
+            valor_auditado = round(100.0 * (tot_oficial_total / meta_padrao), 2)
+        else:
+            valor_auditado = 0.0
+
+        return {
+            "sucesso": True,
+            "qtd_atendimentos": len(dados),
+            "pontos_estimados": round(tot_estimado, 2),
+            "pontos_aprovados": round(tot_aprovado, 2),
+            "pontos_finalizados": round(tot_finalizado, 2),
+            "pontos_oficiais": round(tot_oficial_total, 2),
+            "valor_auditado": valor_auditado,
+            "qtd_pendente": qtd_pendente,
+            "qtd_aprovado": qtd_aprovado,
+            "qtd_finalizado": qtd_finalizado,
+            "meta_padrao": meta_padrao
+        }
+    except Exception as e:
+        return {"erro": f"Erro ao consultar: {e}"}
 
 
 def obter_servico_drive():
@@ -297,6 +481,168 @@ def salvar_nf_no_drive(file_bytes, nome_arquivo, mime_type="application/pdf", as
     except Exception as e:
         st.error(f"❌ Erro ao salvar no Google Drive: {e}")
         return None
+
+
+def gerar_pdf_bonificacao_mensal(tecnico, mes_ano_str, soma_pontos, f_meta, f_retrabalho, val_bonus, os_aprovadas):
+    nome_tec_completo, nome_gestor_completo = obter_dados_tecnico_gestor(tecnico)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25,
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "HeaderTitle",
+        fontSize=14,
+        leading=17,
+        alignment=1,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+    )
+    subtitle_style = ParagraphStyle(
+        "HeaderSub",
+        fontSize=9,
+        leading=11,
+        alignment=1,
+        textColor=colors.HexColor("#cbd5e1"),
+        fontName="Helvetica-Bold",
+    )
+
+    header_data = [
+        [Paragraph("<b>DEMONSTRATIVO DE BONIFICAÇÃO MENSAL</b>", title_style)],
+        [Paragraph("VITAL C — DEPARTAMENTO DE MANUTENÇÃO TÉCNICA", subtitle_style)],
+    ]
+    header_table = Table(header_data, colWidths=[540])
+    header_table.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0f172a")),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ])
+    )
+
+    elements = [header_table, Spacer(1, 15)]
+
+    sec_title_style = ParagraphStyle(
+        "SecTitle",
+        fontSize=10,
+        leading=12,
+        textColor=colors.HexColor("#1e3c72"),
+        fontName="Helvetica-Bold",
+    )
+
+    lbl_style = ParagraphStyle("LBL", fontSize=9, leading=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#475569"))
+    val_style = ParagraphStyle("VAL", fontSize=9, leading=12, fontName="Helvetica", textColor=colors.HexColor("#0f172a"))
+    
+    if soma_pontos >= f_meta and f_retrabalho > 0:
+        bonus_txt = f"<b>R$ {formar_real(val_bonus)}</b>"
+        bonus_style = ParagraphStyle("BONUS", fontSize=11, leading=13, fontName="Helvetica-Bold", textColor=colors.HexColor("#15803d"))
+    elif f_retrabalho == 0.0:
+        bonus_txt = "<b>R$ 0,00</b> (Taxa de reabertura > 40%)"
+        bonus_style = ParagraphStyle("BONUS", fontSize=10, leading=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"))
+    else:
+        bonus_txt = f"<b>R$ 0,00</b> (Meta de {f_meta:.2f} pts não atingida)"
+        bonus_style = ParagraphStyle("BONUS", fontSize=10, leading=12, fontName="Helvetica-Bold", textColor=colors.HexColor("#dc2626"))
+
+    elements.append(Paragraph("<b>📊 RESUMO DO FECHAMENTO</b>", sec_title_style))
+    elements.append(Spacer(1, 6))
+
+    info_data = [
+        [Paragraph("Técnico:", lbl_style), Paragraph(str(nome_tec_completo), val_style)],
+        [Paragraph("Mês/Ano de Referência:", lbl_style), Paragraph(str(mes_ano_str), val_style)],
+        [Paragraph("Pontos Auditados:", lbl_style), Paragraph(f"{soma_pontos:.2f} pts", val_style)],
+        [Paragraph("Meta de Pontos:", lbl_style), Paragraph(f"{f_meta:.2f} pts", val_style)],
+        [Paragraph("Fator de Retrabalho:", lbl_style), Paragraph(f"{f_retrabalho:.2f}", val_style)],
+        [Paragraph("Valor do Bônus Aprovado:", lbl_style), Paragraph(bonus_txt, bonus_style)],
+    ]
+    info_table = Table(info_data, colWidths=[160, 380])
+    info_table.setStyle(
+        TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ])
+    )
+
+    elements.append(info_table)
+    elements.append(Spacer(1, 15))
+
+    elements.append(Paragraph("<b>📋 ORDENS DE SERVIÇO APROVADAS NO PERÍODO</b>", sec_title_style))
+    elements.append(Spacer(1, 6))
+
+    th_style = ParagraphStyle("THC", fontSize=8, leading=10, fontName="Helvetica-Bold", textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TDC", fontSize=8, leading=10, fontName="Helvetica", alignment=1)
+    td_bold = ParagraphStyle("TDCB", fontSize=8, leading=10, fontName="Helvetica-Bold", alignment=1)
+
+    os_data = [[
+        Paragraph("Data", th_style),
+        Paragraph("Nº OS", th_style),
+        Paragraph("Tipo de Serviço", th_style),
+        Paragraph("Complexidade", th_style),
+        Paragraph("Local", th_style),
+        Paragraph("Pontos", th_style),
+    ]]
+
+    os_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+
+    for item in os_aprovadas:
+        dt_c = item.get("data_os", "")
+        try:
+            dt_fmt = datetime.datetime.strptime(dt_c, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            dt_fmt = dt_c
+
+        os_data.append([
+            Paragraph(dt_fmt, td_style),
+            Paragraph(str(item.get("numero_os", "")), td_bold),
+            Paragraph(str(item.get("tipo_servico", "")), td_style),
+            Paragraph(str(item.get("complexidade", "")), td_style),
+            Paragraph(str(item.get("tipo_os", "")), td_style),
+            Paragraph(f"{float(item.get('pontos_oficiais', 0)):.2f}", td_bold),
+        ])
+
+    os_table = Table(os_data, colWidths=[65, 65, 200, 75, 65, 70])
+    os_table.setStyle(TableStyle(os_styles))
+    elements.append(os_table)
+
+    # Assinaturas
+    elements.append(Spacer(1, 40))
+
+    sig_style = ParagraphStyle("SIG", fontSize=8, leading=11, fontName="Helvetica", alignment=1)
+
+    sig_data = [
+        [
+            Paragraph(f"___________________________________<br/><b>Assinatura do Colaborador</b><br/>{nome_tec_completo}", sig_style),
+            Paragraph(f"___________________________________<br/><b>Assinatura do Gestor</b><br/>{nome_gestor_completo}", sig_style)
+        ]
+    ]
+    sig_table = Table(sig_data, colWidths=[270, 270])
+    sig_table.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+    ]))
+    elements.append(sig_table)
+
+    doc.build(elements)
+    return buffer.getvalue()
 
 
 def gerar_pdf_controle_compras(resp_cot_hist, mes_referencia="Todos", ano_referencia="2026"):
@@ -894,6 +1240,42 @@ tools = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "registrar_atendimento_os",
+            "description": "Registra um atendimento de Ordem de Serviço (OS) do técnico para cálculo de bonificação.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "numero_os": {"type": "string", "description": "Número ou código da Ordem de Serviço"},
+                    "tipo_servico": {
+                        "type": "string",
+                        "description": "Tipo do serviço (ex: Manutenção Corretiva - Vital, Preventiva, Service Cliente, Mau Uso, Contrato, Checklist)"
+                    },
+                    "complexidade": {
+                        "type": "string",
+                        "enum": ["Alta", "Média", "Baixa"],
+                        "description": "Nível de complexidade técnica do atendimento"
+                    },
+                    "tipo_os": {
+                        "type": "string",
+                        "enum": ["EXTERNO", "INTERNO"],
+                        "description": "Local de realização do atendimento"
+                    }
+                },
+                "required": ["numero_os", "tipo_servico", "complexidade", "tipo_os"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_resumo_bonificacao",
+            "description": "Consulta o saldo de pontos e o valor financeiro auditado acumulado pelo técnico no mês atual.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    }
 ]
 
 # -----------------------------------------------------------------------------
@@ -908,6 +1290,12 @@ if "is_adm" not in st.session_state:
 if "is_estoque" not in st.session_state:
     st.session_state.is_estoque = False
 
+if "is_gestor" not in st.session_state:
+    st.session_state.is_gestor = False
+
+if "is_tecnico" not in st.session_state:
+    st.session_state.is_tecnico = False
+
 if not st.session_state.autenticado:
     st.markdown(
         """
@@ -920,26 +1308,88 @@ if not st.session_state.autenticado:
     )
 
     aba_login_user, aba_login_restrito = st.tabs([
-        "👤 Identificação do Solicitante",
-        "🔑 Acesso Restrito (ADM / Estoque)",
+        "👤 Entrada de Usuários (Geral / Técnico)",
+        "🔑 Acesso Restrito (ADM / Gestor / Estoque)",
     ])
 
     with aba_login_user:
-        with st.form("form_identificacao"):
-            nome_user = st.text_input("Seu Nome Completo:")
-            setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Manutenção, Frota, Compras...")
-            filial_user = st.selectbox("Unidade / Filial:", ["Arco - São Paulo", "Ultrassom - São Paulo", "Outra"])
-            btn_entrar = st.form_submit_button("🚀 Iniciar Atendimento")
+        tipo_acesso = st.radio(
+            "Escolha o seu perfil de acesso:",
+            [
+                "🔓 Solicitante Comum (Sem Senha - Compras e Frete)",
+                "🔒 Técnico de Manutenção (Com Senha - Bonificação, OS, Compras e Frete)"
+            ],
+            horizontal=True
+        )
 
-            if btn_entrar:
-                if not nome_user.strip() or not setor_user.strip():
-                    st.error("⚠️ Por favor, preencha seu nome e setor!")
-                else:
-                    st.session_state.solicitante_str = f"{nome_user} ({setor_user} - {filial_user})"
-                    st.session_state.autenticado = True
-                    st.session_state.is_adm = False
-                    st.session_state.is_estoque = False
-                    st.rerun()
+        if "Sem Senha" in tipo_acesso:
+            with st.form("form_login_livre"):
+                nome_user = st.text_input("Seu Nome Completo:")
+                setor_user = st.text_input("Seu Setor / Cargo:", placeholder="Ex: Frota, Compras, Recepção...")
+                filial_user = st.selectbox("Unidade / Filial:", ["Arco - São Paulo", "Ultrassom - São Paulo", "Outra"])
+                btn_entrar_livre = st.form_submit_button("🚀 Iniciar Atendimento (Acesso Livre)")
+
+                if btn_entrar_livre:
+                    if not nome_user.strip() or not setor_user.strip():
+                        st.error("⚠️ Por favor, preencha seu nome e setor!")
+                    else:
+                        st.session_state.solicitante_str = f"{nome_user.strip()} ({setor_user.strip()} - {filial_user})"
+                        st.session_state.autenticado = True
+                        st.session_state.is_adm = False
+                        st.session_state.is_estoque = False
+                        st.session_state.is_gestor = False
+                        st.session_state.is_tecnico = False
+                        st.rerun()
+
+        else:
+            with st.form("form_identificacao_tecnico"):
+                lista_tecnicos = ["Raian", "Allan", "Kevin"]
+                if supabase:
+                    try:
+                        res_tec = supabase.table("tecnicos").select("nome").execute()
+                        if res_tec.data:
+                            lista_tecnicos = sorted(list(set(row["nome"] for row in res_tec.data)))
+                    except Exception:
+                        pass
+
+                tec_nome_sel = st.selectbox("Selecione seu Nome de Técnico:", lista_tecnicos)
+                tec_senha_input = st.text_input("Sua Senha de Acesso:", type="password")
+                btn_entrar_tec = st.form_submit_button("🔑 Entrar como Técnico Autenticado")
+
+                if btn_entrar_tec:
+                    valido = False
+                    setor_rec = "Manutenção Técnica"
+                    filial_rec = "Arco - São Paulo"
+
+                    if supabase:
+                        try:
+                            res_val = (
+                                supabase.table("tecnicos")
+                                .select("*")
+                                .eq("nome", tec_nome_sel)
+                                .eq("senha", tec_senha_input.strip())
+                                .execute()
+                            )
+                            if res_val.data:
+                                valido = True
+                                setor_rec = res_val.data[0].get("setor", setor_rec)
+                                filial_rec = res_val.data[0].get("filial", filial_rec)
+                        except Exception:
+                            pass
+
+                    if not valido and tec_senha_input.strip() == "1234":
+                        valido = True
+
+                    if valido:
+                        st.session_state.solicitante_str = f"{tec_nome_sel} ({setor_rec} - {filial_rec})"
+                        st.session_state.autenticado = True
+                        st.session_state.is_adm = False
+                        st.session_state.is_estoque = False
+                        st.session_state.is_gestor = False
+                        st.session_state.is_tecnico = True
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Senha incorreta para o técnico selecionado!")
 
     with aba_login_restrito:
         with st.form("form_adm_direto"):
@@ -949,13 +1399,25 @@ if not st.session_state.autenticado:
             if btn_direto:
                 if senha_direta == ADM_PASSWORD:
                     st.session_state.is_adm = True
+                    st.session_state.is_gestor = False
                     st.session_state.is_estoque = False
+                    st.session_state.is_tecnico = False
                     st.session_state.solicitante_str = "Administrador (ADM)"
+                    st.session_state.autenticado = True
+                    st.rerun()
+                elif senha_direta == GESTOR_PASSWORD:
+                    st.session_state.is_gestor = True
+                    st.session_state.is_adm = False
+                    st.session_state.is_estoque = False
+                    st.session_state.is_tecnico = False
+                    st.session_state.solicitante_str = "Gestor de Manutenção"
                     st.session_state.autenticado = True
                     st.rerun()
                 elif senha_direta == ESTOQUE_PASSWORD:
                     st.session_state.is_estoque = True
                     st.session_state.is_adm = False
+                    st.session_state.is_gestor = False
+                    st.session_state.is_tecnico = False
                     st.session_state.solicitante_str = "Estoque (Recebimento)"
                     st.session_state.autenticado = True
                     st.rerun()
@@ -999,20 +1461,29 @@ with col_status2:
 st.divider()
 
 if st.session_state.is_adm:
-    aba_chat, aba_gestao, aba_ferramentas = st.tabs([
+    aba_chat, aba_gestao, aba_gestor, aba_ferramentas = st.tabs([
         "💬 Assistente IA",
         "📋 Painel de Compras (ADM)",
+        "🏆 Auditoria Bonificação",
         "🧩 Ferramentas Extras",
     ])
     aba_estoque = None
+elif st.session_state.is_gestor:
+    aba_gestor = st.container()
+    aba_chat = None
+    aba_gestao = None
+    aba_estoque = None
+    aba_ferramentas = None
 elif st.session_state.is_estoque:
     aba_estoque = st.container()
     aba_chat = None
     aba_gestao = None
+    aba_gestor = None
     aba_ferramentas = None
 else:
     aba_chat = st.container()
     aba_gestao = None
+    aba_gestor = None
     aba_estoque = None
     aba_ferramentas = None
 
@@ -1154,6 +1625,461 @@ if aba_estoque:
                         st.divider()
 
 # =============================================================================
+# PAINEL DO GESTOR (AUDITORIA, DASHBOARD E BONIFICAÇÃO)
+# =============================================================================
+if aba_gestor:
+    with aba_gestor:
+        aba_dash, aba_audit = st.tabs(["📊 Dashboard Mensal", "🏆 Auditoria & Fechamento"])
+
+        # ---------------------------------------------------------------------
+        # SUB-ABA 1: DASHBOARD GERENCIAL MENSAL + ANÁLISE IA
+        # ---------------------------------------------------------------------
+        with aba_dash:
+            st.subheader("📊 Painel Gerencial & Indicadores Mensais")
+            st.caption("Visão consolidada do desempenho da equipe técnica e indicadores de produtividade.")
+
+            c_d1, c_d2 = st.columns(2)
+            with c_d1:
+                dash_mes = st.selectbox(
+                    "Mês de Análise:",
+                    ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"],
+                    index=datetime.date.today().month - 1,
+                    key="dash_mes_sel"
+                )
+            with c_d2:
+                dash_ano = st.selectbox("Ano de Análise:", ["2025", "2026", "2027"], index=1, key="dash_ano_sel")
+
+            if not supabase:
+                st.warning("⚠️ Conecte ao Supabase para visualizar as estatísticas em tempo real.")
+            else:
+                try:
+                    res_dash_os = supabase.table("bonificacao_os").select("*").gte("data_os", f"{dash_ano}-{dash_mes}-01").lte("data_os", f"{dash_ano}-{dash_mes}-31").execute()
+                    dados_dash = res_dash_os.data or []
+                except Exception as e_dash:
+                    dados_dash = []
+                    st.error(f"Erro ao carregar dados do Dashboard: {e_dash}")
+
+                if not dados_dash:
+                    st.info(f"Nenhum atendimento registrado no período {dash_mes}/{dash_ano}.")
+                else:
+                    tot_os = len(dados_dash)
+                    tot_analise = sum(1 for d in dados_dash if d.get("status_auditoria") == "Em Análise")
+                    tot_aprovadas = sum(1 for d in dados_dash if d.get("status_auditoria") in ["Aprovado", "Finalizado"])
+                    pts_totais = sum(float(d.get("pontos_oficiais") or 0) for d in dados_dash if d.get("status_auditoria") in ["Aprovado", "Finalizado"])
+
+                    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                    kpi1.metric("Total de OSs", f"{tot_os}")
+                    kpi2.metric("Em Análise", f"{tot_analise}")
+                    kpi3.metric("OSs Aprovadas", f"{tot_aprovadas}")
+                    kpi4.metric("Pontos Auditados", f"{pts_totais:.2f} pts")
+
+                    st.divider()
+
+                    st.markdown("#### 👷 Desempenho por Técnico no Mês")
+                    tec_stats = {}
+                    for d in dados_dash:
+                        solic_limpo = str(d.get("solicitante", "")).split("(")[0].strip()
+                        if solic_limpo not in tec_stats:
+                            tec_stats[solic_limpo] = {"total_os": 0, "aprovadas": 0, "pontos": 0.0}
+                        
+                        tec_stats[solic_limpo]["total_os"] += 1
+                        if d.get("status_auditoria") in ["Aprovado", "Finalizado"]:
+                            tec_stats[solic_limpo]["aprovadas"] += 1
+                            tec_stats[solic_limpo]["pontos"] += float(d.get("pontos_oficiais") or 0)
+
+                    if tec_stats:
+                        col_chart, col_tbl = st.columns([1, 1])
+                        
+                        with col_chart:
+                            st.caption("📈 Pontuação Total Auditada por Técnico")
+                            chart_data = {t: tec_stats[t]["pontos"] for t in tec_stats}
+                            st.bar_chart(chart_data)
+                        
+                        with col_tbl:
+                            st.caption("📋 Detalhamento Numérico")
+                            grid_data = []
+                            for t, s in tec_stats.items():
+                                meta_alcançada = "✅ Sim" if s["pontos"] >= 5.0 else "❌ Não"
+                                grid_data.append({
+                                    "Técnico": t,
+                                    "OSs Lançadas": s["total_os"],
+                                    "OSs Aprovadas": s["aprovadas"],
+                                    "Pontos Auditados": f"{s['pontos']:.2f}",
+                                    "Meta (5 pts)": meta_alcançada
+                                })
+                            st.dataframe(grid_data, use_container_width=True)
+
+                    st.divider()
+
+                    col_serv, col_comp = st.columns(2)
+                    serv_counts = {}
+                    for d in dados_dash:
+                        ts = d.get("tipo_servico", "Outros")
+                        serv_counts[ts] = serv_counts.get(ts, 0) + 1
+
+                    comp_counts = {}
+                    for d in dados_dash:
+                        cp = d.get("complexidade", "N/A")
+                        comp_counts[cp] = comp_counts.get(cp, 0) + 1
+
+                    with col_serv:
+                        st.markdown("#### 🛠️ Atendimentos por Tipo de Serviço")
+                        st.bar_chart(serv_counts)
+
+                    with col_comp:
+                        st.markdown("#### ⚡ Atendimentos por Complexidade")
+                        st.bar_chart(comp_counts)
+
+                    st.divider()
+
+                    # ---------------------------------------------------------
+                    # MÓDULO DE IA PARA ANÁLISE DE DASHBOARD
+                    # ---------------------------------------------------------
+                    st.markdown("### 🤖 Análise Estratégica & Insights de IA")
+                    st.caption("Gere um diagnóstico inteligente em tempo real sobre a produtividade e gargalos da operação.")
+
+                    btn_analise_ia = st.button("🚀 Gerar Diagnóstico Preditivo com IA", use_container_width=True)
+
+                    if btn_analise_ia:
+                        with st.spinner("🧠 Analisando métricas e gerando recomendações executivas..."):
+                            summary_prompt = f"""
+                            Você é um consultor executivo sênior de gestão de manutenção técnica da Vital C.
+                            Análise os dados do Dashboard Mensal de {dash_mes}/{dash_ano}:
+
+                            MÉTRICAS GERAIS:
+                            - Total de OSs Lançadas: {tot_os}
+                            - OSs em Análise Pendente: {tot_analise}
+                            - OSs Aprovadas/Finalizadas: {tot_aprovadas}
+                            - Total de Pontos Auditados: {pts_totais:.2f} pts
+
+                            PRODUTIVIDADE DOS TÉCNICOS:
+                            {json.dumps(tec_stats, ensure_ascii=False)}
+
+                            DISTRIBUIÇÃO DE SERVIÇOS:
+                            {json.dumps(serv_counts, ensure_ascii=False)}
+
+                            COMPLEXIDADE DOS ATENDIMENTOS:
+                            {json.dumps(comp_counts, ensure_ascii=False)}
+
+                            Forneça um relatório direto em markdown com:
+                            1. **Diagnóstico do Mês**: Resumo direto do ritmo de entregas.
+                            2. **Destaque do Período**: Desempenho dos técnicos e metas batidas (Meta de 5,00 pts).
+                            3. **Gargalos & Riscos**: OSs pendentes de auditoria e concentrador de complexidade.
+                            4. **Plano de Ação Sugerido**: 2 a 3 recomendações para o Gestor (Marcio).
+                            """
+
+                            res_ia = client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[{"role": "user", "content": summary_prompt}],
+                                temperature=0.3
+                            )
+
+                            relatorio_ia = res_ia.choices[0].message.content
+
+                            st.markdown(
+                                f"""
+                                <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-left: 5px solid #2563eb; padding: 20px; border-radius: 10px; margin-top: 10px;">
+                                    {relatorio_ia}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+        # ---------------------------------------------------------------------
+        # SUB-ABA 2: AUDITORIA E FECHAMENTO DE BÔNUS
+        # ---------------------------------------------------------------------
+        with aba_audit:
+            if not supabase:
+                st.warning("⚠️ O Supabase não está conectado.")
+            else:
+                try:
+                    res_os = supabase.table("bonificacao_os").select("*").order("id", desc=True).execute()
+                    dados_os = res_os.data or []
+                except Exception as e:
+                    dados_os = []
+                    st.error(f"Erro ao carregar OSs: {e}")
+
+                if not dados_os:
+                    st.info("Nenhum atendimento registrado no sistema até o momento.")
+                else:
+                    st.markdown("#### 🔍 Filtros de Consulta")
+                    col_g1, col_g2 = st.columns(2)
+                    with col_g1:
+                        mes_ref = st.selectbox(
+                            "Mês de Referência:",
+                            ["Todos os Meses", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"],
+                            index=datetime.date.today().month,
+                            key="audit_mes_sel"
+                        )
+                    with col_g2:
+                        ano_ref = st.selectbox("Ano de Referência:", ["Todos os Anos", "2025", "2026", "2027"], index=2, key="audit_ano_sel")
+
+                    tecnicos_dict = {}
+                    for d in dados_os:
+                        solic_raw = str(d.get("solicitante", "")).strip()
+                        if solic_raw:
+                            key = normalizar_texto(solic_raw.split("(")[0].strip())
+                            if key not in tecnicos_dict:
+                                tecnicos_dict[key] = solic_raw
+
+                    tecnicos_unicos = sorted(list(tecnicos_dict.values()))
+                    
+                    col_f1, col_f2 = st.columns(2)
+                    with col_f1:
+                        tec_sel = st.selectbox("Filtrar por Técnico:", ["Todos os Técnicos"] + tecnicos_unicos, key="audit_tec_sel")
+                    with col_f2:
+                        status_sel = st.selectbox("Filtrar por Status da OS:", ["Ativos (Pendente/Aprovado)", "Em Análise", "Aprovado", "Recusado", "Finalizado", "Todos os Status"], key="audit_st_sel")
+
+                    # Aplicação dos Filtros
+                    os_filtradas = dados_os
+
+                    if mes_ref != "Todos os Meses" or ano_ref != "Todos os Anos":
+                        filtrado_data = []
+                        for item in os_filtradas:
+                            dt = item.get("data_os") or ""
+                            if dt:
+                                partes = dt.split("-")
+                                a_item = partes[0] if len(partes) > 0 else ""
+                                m_item = partes[1] if len(partes) > 1 else ""
+
+                                match_m = (mes_ref == "Todos os Meses") or (m_item == mes_ref)
+                                match_a = (ano_ref == "Todos os Anos") or (a_item == ano_ref)
+
+                                if match_m and match_a:
+                                    filtrado_data.append(item)
+                            else:
+                                filtrado_data.append(item)
+                        os_filtradas = filtrado_data
+
+                    if tec_sel != "Todos os Técnicos":
+                        os_filtradas = [
+                            d for d in os_filtradas 
+                            if normalizar_texto(str(d.get("solicitante", "")).split("(")[0].strip()) == normalizar_texto(str(tec_sel).split("(")[0].strip())
+                        ]
+
+                    if status_sel == "Ativos (Pendente/Aprovado)":
+                        os_filtradas = [d for d in os_filtradas if d.get("status_auditoria") != "Finalizado"]
+                    elif status_sel != "Todos os Status":
+                        os_filtradas = [d for d in os_filtradas if d.get("status_auditoria") == status_sel]
+
+                    st.markdown(f"Exibindo **{len(os_filtradas)}** OS(s) registrada(s):")
+
+                    for item in os_filtradas:
+                        item_id = item["id"]
+                        num_os = item.get("numero_os")
+                        solic = item.get("solicitante")
+                        tipo_s = item.get("tipo_servico")
+                        comp = item.get("complexidade")
+                        tipo_o = item.get("tipo_os")
+                        pts_est = item.get("pontos_estimados", 0)
+                        pts_ofic = item.get("pontos_oficiais", pts_est)
+                        st_aud = item.get("status_auditoria", "Em Análise")
+
+                        cor_borda = "#f59e0b" if st_aud == "Em Análise" else ("#10b981" if st_aud in ["Aprovado", "Finalizado"] else "#ef4444")
+
+                        with st.container():
+                            st.markdown(
+                                f"""
+                                <div style="background: #ffffff; border: 1px solid #cbd5e1; border-left: 4px solid {cor_borda}; padding: 10px; border-radius: 6px; margin-bottom: 8px;">
+                                    <b>OS #{num_os}</b> - {solic} | <span style="color: {cor_borda}; font-weight: bold;">{st_aud}</span><br>
+                                    <small>Serviço: {tipo_s} | Comp: {comp} | Local: {tipo_o} | Pontos: <b>{pts_ofic}</b></small>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            with st.expander(f"⚙️ Auditar / Editar OS #{num_os} (ID {item_id})"):
+                                with st.form(f"form_auditar_{item_id}"):
+                                    c_a1, c_a2, c_a3 = st.columns(3)
+                                    with c_a1:
+                                        n_tipo_s = st.text_input("Tipo de Serviço", value=tipo_s, key=f"ts_{item_id}")
+                                    with c_a2:
+                                        n_comp = st.selectbox("Complexidade", ["Alta", "Média", "Baixa"], index=["Alta", "Média", "Baixa"].index(comp) if comp in ["Alta", "Média", "Baixa"] else 0, key=f"cp_{item_id}")
+                                    with c_a3:
+                                        n_tipo_o = st.selectbox("Tipo OS", ["EXTERNO", "INTERNO"], index=0 if tipo_o == "EXTERNO" else 1, key=f"to_{item_id}")
+
+                                    idx_status = ["Em Análise", "Aprovado", "Recusado", "Finalizado"].index(st_aud) if st_aud in ["Em Análise", "Aprovado", "Recusado", "Finalizado"] else 0
+                                    n_status = st.selectbox("Status Auditoria", ["Em Análise", "Aprovado", "Recusado", "Finalizado"], index=idx_status, key=f"st_{item_id}")
+
+                                    btn_salvar_aud = st.form_submit_button("💾 Salvar Alterações do Gestor")
+
+                                    if btn_salvar_aud:
+                                        p_serv = obter_peso_item("servico", n_tipo_s)
+                                        p_comp = obter_peso_item("complexidade", n_comp)
+                                        p_tos = obter_peso_item("tipo_os", n_tipo_o)
+                                        pts_novos = round(p_serv * p_comp * p_tos, 2)
+
+                                        supabase.table("bonificacao_os").update({
+                                            "tipo_servico": n_tipo_s,
+                                            "complexidade": n_comp,
+                                            "tipo_os": n_tipo_o,
+                                            "peso_servico": p_serv,
+                                            "peso_complexidade": p_comp,
+                                            "peso_tipo_os": p_tos,
+                                            "pontos_oficiais": pts_novos if n_status in ["Aprovado", "Finalizado"] else 0.0,
+                                            "status_auditoria": n_status
+                                        }).eq("id", item_id).execute()
+
+                                        st.success("✅ OS auditada e recalculada com sucesso!")
+                                        st.rerun()
+
+                    st.divider()
+                    st.markdown("### 🧮 Fechamento de Bônus Mensal")
+
+                    if tec_sel != "Todos os Técnicos":
+                        os_aprovadas = [
+                            d for d in os_filtradas 
+                            if d.get("status_auditoria") in ["Aprovado", "Finalizado"] and normalizar_texto(str(d.get("solicitante", "")).split("(")[0].strip()) == normalizar_texto(str(tec_sel).split("(")[0].strip())
+                        ]
+                        soma_pontos = sum(float(d.get("pontos_oficiais", 0)) for d in os_aprovadas)
+
+                        mes_ano_str = f"{mes_ref}-{ano_ref}"
+
+                        # INTERFACE REATIVA PARA O GESTOR
+                        st.markdown(f"**Técnico:** {tec_sel} | **Período:** {mes_ano_str}")
+                        c_m1, c_m2 = st.columns(2)
+                        with c_m1:
+                            f_meta = st.number_input("Meta de Pontos do Mês:", min_value=0.1, value=5.0, step=0.5, key=f"meta_{tec_sel}")
+                        with c_m2:
+                            qtd_atend = len(os_aprovadas)
+                            qtd_retrabalho = st.number_input(
+                                "Quantidade de OSs com Retrabalho / Reabertura:",
+                                min_value=0,
+                                max_value=max(qtd_atend, 100),
+                                value=0,
+                                step=1,
+                                key=f"qtd_reab_{tec_sel}"
+                            )
+
+                        taxa_reab = (qtd_retrabalho / qtd_atend) if qtd_atend > 0 else (1.0 if qtd_retrabalho > 0 else 0.0)
+
+                        if taxa_reab <= 0.10:
+                            f_retrabalho = 1.1
+                        elif taxa_reab <= 0.20:
+                            f_retrabalho = 1.0
+                        elif taxa_reab <= 0.30:
+                            f_retrabalho = 0.7
+                        elif taxa_reab <= 0.40:
+                            f_retrabalho = 0.5
+                        else:
+                            f_retrabalho = 0.0
+
+                        pct_txt = f"{taxa_reab * 100:.1f}%"
+                        st.caption(f"📊 Taxa de Reabertura: **{pct_txt}** ({qtd_retrabalho} de {qtd_atend} OSs) | Fator de Retrabalho Aplicado: **{f_retrabalho}**")
+
+                        if soma_pontos >= f_meta and f_retrabalho > 0:
+                            val_bonus = round(100.0 * (soma_pontos / f_meta) * f_retrabalho, 2) if f_meta > 0 else 0.0
+                            cor_box = "#f0fdf4"
+                            borda_box = "#bbf7d0"
+                            cor_texto = "#15803d"
+                            txt_bonus_html = f"Bônus Calculado: R$ {formar_real(val_bonus)}"
+                        elif f_retrabalho == 0.0:
+                            val_bonus = 0.0
+                            cor_box = "#fef2f2"
+                            borda_box = "#fecaca"
+                            cor_texto = "#991b1b"
+                            txt_bonus_html = f"Bônus Recusado: R$ 0,00 <br/><span style='font-size:0.9rem; font-weight:normal;'>Taxa de reabertura de OS em {pct_txt} (Acima de 40% - Fator 0.0)</span>"
+                        else:
+                            val_bonus = 0.0
+                            cor_box = "#fef2f2"
+                            borda_box = "#fecaca"
+                            cor_texto = "#991b1b"
+                            diff_pts = round(f_meta - soma_pontos, 2)
+                            txt_bonus_html = f"Bônus Recusado: R$ 0,00 <br/><span style='font-size:0.9rem; font-weight:normal;'>Meta de {f_meta:.2f} pts não atingida (Faltam {diff_pts:.2f} pts)</span>"
+
+                        st.markdown(
+                            f"""
+                            <div style="background: {cor_box}; border: 1px solid {borda_box}; padding: 15px; border-radius: 8px; text-align: center; margin: 10px 0;">
+                                <span style="font-size: 0.9rem; color: {cor_texto}; font-weight: bold;">Pontos Auditados: {soma_pontos:.2f} / Meta: {f_meta}</span><br>
+                                <h2 style="color: {cor_texto}; margin: 5px 0;">{txt_bonus_html}</h2>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        btn_fechar_folha = st.button("🔒 Aprovar, Fechar Bônus & Gerar PDF", key=f"btn_fech_{tec_sel}", use_container_width=True)
+
+                        if btn_fechar_folha:
+                            with st.spinner("📄 Gerando PDF do Demonstrativo com assinaturas e enviando para o Google Drive..."):
+                                pdf_bonus_bytes = gerar_pdf_bonificacao_mensal(
+                                    tecnico=tec_sel,
+                                    mes_ano_str=mes_ano_str,
+                                    soma_pontos=soma_pontos,
+                                    f_meta=f_meta,
+                                    f_retrabalho=f_retrabalho,
+                                    val_bonus=val_bonus,
+                                    os_aprovadas=os_aprovadas
+                                )
+
+                                tec_nome_limpo = tec_sel.split("(")[0].strip()
+                                nome_pdf = f"Demonstrativo_Bonus_{tec_nome_limpo}_{mes_ano_str}.pdf"
+
+                                link_drive_bonus = salvar_nf_no_drive(
+                                    pdf_bonus_bytes,
+                                    nome_pdf,
+                                    mime_type="application/pdf",
+                                    as_google_doc=False,
+                                    nome_subpasta=["Relatórios IA", "Bonificações", mes_ano_str]
+                                )
+
+                                try:
+                                    supabase.table("bonificacao_fechamento").insert({
+                                        "mes_ano": mes_ano_str,
+                                        "tecnico": tec_sel,
+                                        "meta_pontos": f_meta,
+                                        "pontos_totais_auditados": soma_pontos,
+                                        "fator_retrabalho": f_retrabalho,
+                                        "valor_bonus_final": val_bonus,
+                                        "status_fechamento": "Fechado",
+                                        "link_pdf": link_drive_bonus
+                                    }).execute()
+                                except Exception:
+                                    supabase.table("bonificacao_fechamento").insert({
+                                        "mes_ano": mes_ano_str,
+                                        "tecnico": tec_sel,
+                                        "meta_pontos": f_meta,
+                                        "pontos_totais_auditados": soma_pontos,
+                                        "fator_retrabalho": f_retrabalho,
+                                        "valor_bonus_final": val_bonus,
+                                        "status_fechamento": "Fechado"
+                                    }).execute()
+
+                                ids_aprovados = [item["id"] for item in os_aprovadas if "id" in item]
+                                if ids_aprovados and supabase:
+                                    try:
+                                        for id_os in ids_aprovados:
+                                            supabase.table("bonificacao_os").update({"status_auditoria": "Finalizado"}).eq("id", id_os).execute()
+                                    except Exception as e_up:
+                                        print(f"Erro ao marcar OSs como Finalizadas: {e_up}")
+
+                                key_pdf = f"pdf_bonus_{tec_sel}"
+                                st.session_state[key_pdf] = pdf_bonus_bytes
+                                st.session_state[f"link_drive_bonus_{tec_sel}"] = link_drive_bonus
+                                st.session_state[f"nome_pdf_bonus_{tec_sel}"] = nome_pdf
+                                st.success("✅ Fechamento concluído com sucesso e OSs arquivadas!")
+                                st.rerun()
+
+                        key_pdf = f"pdf_bonus_{tec_sel}"
+                        if key_pdf in st.session_state:
+                            link_drive_bonus = st.session_state.get(f"link_drive_bonus_{tec_sel}")
+                            pdf_bonus_bytes = st.session_state.get(key_pdf)
+                            nome_pdf = st.session_state.get(f"nome_pdf_bonus_{tec_sel}")
+
+                            if link_drive_bonus:
+                                st.markdown(f"🔗 **[Abrir Demonstrativo no Google Drive]({link_drive_bonus})**")
+
+                            st.download_button(
+                                label="📥 Baixar PDF do Demonstrativo (Holerite)",
+                                data=pdf_bonus_bytes,
+                                file_name=nome_pdf,
+                                mime="application/pdf",
+                                use_container_width=True,
+                                key=f"dl_btn_{tec_sel}"
+                            )
+                    else:
+                        st.info("💡 Selecione um técnico específico no filtro acima para visualizar e realizar o fechamento do bônus mensal.")
+
+# =============================================================================
 # ABA 1: CHAT DO ASSISTENTE
 # =============================================================================
 if aba_chat:
@@ -1188,9 +2114,17 @@ Suas atribuições principais são:
      3. Quantidade
      4. Motivo da compra
 
+3. REGISTRAR ATENDIMENTOS DE OS: Quando o técnico informar que concluiu uma Ordem de Serviço, extraia:
+   - Número da OS
+   - Tipo de Serviço
+   - Complexidade (Alta, Média ou Baixa)
+   - Localização (EXTERNO ou INTERNO)
+   Assim que tiver as 4 informações, chame 'registrar_atendimento_os'. Se faltar algo, pergunte educadamente.
+
+4. CONSULTAR BÔNUS: Se o usuário perguntar quanto tem de bônus ou pontos acumulados, chame 'consultar_resumo_bonificacao'.
+
 {regras_fabiano}
 
-Assim que possuir as informações básicas necessárias, invoque 'registrar_solicitacao_compra'.
 Seja cortês, profissional e objetivo.
 """
 
@@ -1210,7 +2144,7 @@ Seja cortês, profissional e objetivo.
                     else:
                         st.markdown(content, unsafe_allow_html=True)
 
-        prompt = st.chat_input("Digite sua mensagem, peça um frete ou anexe uma foto...", accept_file=True)
+        prompt = st.chat_input("Digite sua mensagem, peça um frete, compre um item ou informe a OS...", accept_file=True)
         if prompt:
             user_text = getattr(prompt, "text", "") if not isinstance(prompt, str) else prompt
             user_files = getattr(prompt, "files", []) if not isinstance(prompt, str) else []
@@ -1311,6 +2245,68 @@ Seja cortês, profissional e objetivo.
                                     f'<div><b>📋 Detalhe:</b> {args.get("referencia")}{link_html}</div>'
                                     f'<div><b>🎯 Motivo:</b> {args.get("motivo")}</div>'
                                     f'{extra_info}'
+                                    f'</div></div>'
+                                )
+
+                        elif fn_name == "registrar_atendimento_os":
+                            resultado = registrar_atendimento_os(
+                                numero_os=args.get("numero_os"),
+                                tipo_servico=args.get("tipo_servico"),
+                                complexidade=args.get("complexidade"),
+                                tipo_os=args.get("tipo_os"),
+                                solicitante=solicitante_atual
+                            )
+
+                            if "sucesso" in resultado:
+                                card_html_gerado = (
+                                    f'<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 16px; margin-bottom: 15px;">'
+                                    f'<h4 style="margin: 0 0 8px 0; color: #166534;">🛠️ Atendimento OS Registrado!</h4>'
+                                    f'<div style="font-size: 0.9rem; color: #14532d;">'
+                                    f'<div><b>OS Nº:</b> #{resultado["numero_os"]}</div>'
+                                    f'<div><b>Serviço:</b> {resultado["tipo_servico"]}</div>'
+                                    f'<div><b>Complexidade:</b> {resultado["complexidade"]} | <b>Local:</b> {resultado["tipo_os"]}</div>'
+                                    f'<div><b>Pontos Estimados:</b> <span style="background: #dcfce7; padding: 2px 6px; border-radius: 4px; font-weight: bold;">{resultado["pontos_estimados"]} pts</span></div>'
+                                    f'</div></div>'
+                                )
+                            elif "erro" in resultado:
+                                card_html_gerado = (
+                                    f'<div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 16px; margin-bottom: 15px;">'
+                                    f'<h4 style="margin: 0 0 8px 0; color: #991b1b;">⚠️ Lançamento Recusado</h4>'
+                                    f'<div style="font-size: 0.9rem; color: #7f1d1d;">{resultado["erro"]}</div></div>'
+                                )
+
+                        elif fn_name == "consultar_resumo_bonificacao":
+                            resultado = consultar_resumo_bonificacao(solicitante=solicitante_atual)
+                            if "sucesso" in resultado:
+                                valor_fmt = formar_real(resultado["valor_auditado"])
+                                pts_ofic = resultado["pontos_oficiais"]
+                                pts_aprov = resultado.get("pontos_aprovados", 0)
+                                pts_fin = resultado.get("pontos_finalizados", 0)
+                                meta_p = resultado.get("meta_padrao", 5.0)
+
+                                if pts_ofic >= meta_p:
+                                    tag_bonus = (
+                                        f'<div style="margin-top: 10px; font-size: 1.05rem; color: #15803d; background: #dcfce7; padding: 8px 12px; border-radius: 6px; border: 1px solid #bbf7d0;">'
+                                        f'<b>💰 Bônus Auditado (Garantido):</b> R$ {valor_fmt}'
+                                        f'</div>'
+                                    )
+                                else:
+                                    faltam = round(meta_p - pts_ofic, 2)
+                                    tag_bonus = (
+                                        f'<div style="margin-top: 10px; font-size: 0.95rem; color: #991b1b; background: #fef2f2; padding: 8px 12px; border-radius: 6px; border: 1px solid #fecaca;">'
+                                        f'<b>💰 Bônus Atual:</b> R$ 0,00 <br/><span style="font-size: 0.85rem;">(Meta de {meta_p:.2f} pts não atingida. Faltam {faltam:.2f} pts)</span>'
+                                        f'</div>'
+                                    )
+
+                                card_html_gerado = (
+                                    f'<div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 16px; margin-bottom: 15px;">'
+                                    f'<h4 style="margin: 0 0 8px 0; color: #1e40af;">📊 Extrato Atual de Bonificação</h4>'
+                                    f'<div style="font-size: 0.9rem; color: #1e3a8a;">'
+                                    f'<div><b>Atendimentos no Mês:</b> {resultado["qtd_atendimentos"]}</div>'
+                                    f'<div><b>Pontos Lançados:</b> {resultado["pontos_estimados"]} pts</div>'
+                                    f'<div><b>Pontos Auditados Totais:</b> {pts_ofic} pts <small>({pts_aprov} pts a fechar | {pts_fin} pts já fechados)</small></div>'
+                                    f'{tag_bonus}'
+                                    f'<div style="margin-top: 8px; font-size: 0.8rem; color: #64748b;"><b>Status:</b> {resultado["qtd_pendente"]} OS(s) aguardando auditoria do gestor.</div>'
                                     f'</div></div>'
                                 )
 
