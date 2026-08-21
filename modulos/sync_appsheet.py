@@ -4,17 +4,13 @@ from supabase import create_client
 import os
 
 def iniciar():
-    # URL e ID da aba Acompanharv2
     sheet_url = "https://docs.google.com/spreadsheets/d/1Q5fBVFYNB4rB-zpUC7YUqMFwyGE56Vrm2-GEyTxWQNA/edit?usp=sharing"
     gid_aba = "978876710"
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.caption("Sincronização de pedidos **Aguardando pedido** com o AppSheet")
+    with st.expander("🔄 Sincronização Google Sheets / AppSheet"):
+        st.caption("Sincroniza automaticamente os pedidos com status **Aguardando pedido** diretamente da planilha.")
         
-    with col2:
-        if st.button("🚀 Sincronizar AppSheet", use_container_width=True):
+        if st.button("🚀 Sincronizar Agora com o AppSheet", use_container_width=True):
             try:
                 file_id = sheet_url.split('/d/')[1].split('/')[0]
                 csv_url = f'https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv&gid={gid_aba}'
@@ -31,7 +27,7 @@ def iniciar():
                 col_link = next((c for c in df.columns if 'link' in c.lower()), None)
 
                 if not col_status or not col_item:
-                    st.error("❌ Colunas da aba não encontradas.")
+                    st.error("❌ Não foi possível mapear as colunas da planilha.")
                     return
 
                 supabase_url = os.getenv("SUPABASE_URL")
@@ -100,4 +96,4 @@ def iniciar():
                 st.toast(f"✅ Sincronizado! {novos} novos itens importados.", icon="🚀")
                 
             except Exception as e:
-                st.error(f"Erro: {e}")
+                st.error(f"Erro ao acessar planilha: {e}")
